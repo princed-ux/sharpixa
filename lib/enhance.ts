@@ -1766,6 +1766,123 @@ export async function removeBackgroundFromImage(
   return removeBackgroundFromCanvas(canvas, maskDataUrl);
 }
 
+// Automatically remove the background from an image without a brush mask.
+// Samples the dominant color at the image edges and removes matching pixels
+// with a soft matte transition. Works best on images with uniform backgrounds.
+export async function autoRemoveBackgroundFromImage(
+  img: HTMLImageElement,
+): Promise<HTMLCanvasElement> {
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context not available");
+  ctx.drawImage(img, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const px = imageData.data;
+
+  // Sample edge pixels to estimate the background color.
+  const stepX = Math.max(1, Math.floor(w / 80));
+  const stepY = Math.max(1, Math.floor(h / 80));
+  let rSum = 0, gSum = 0, bSum = 0, n = 0;
+
+  for (let x = 0; x < w; x += stepX) {
+    for (const y of [0, h - 1]) {
+      const i = (y * w + x) * 4;
+      rSum += px[i]; gSum += px[i + 1]; bSum += px[i + 2]; n++;
+    }
+  }
+  for (let y = 1; y < h - 1; y += stepY) {
+    for (const x of [0, w - 1]) {
+      const i = (y * w + x) * 4;
+      rSum += px[i]; gSum += px[i + 1]; bSum += px[i + 2]; n++;
+    }
+  }
+
+  const bgR = rSum / n;
+  const bgG = gSum / n;
+  const bgB = bSum / n;
+
+  // Compute the average edge-pixel distance from the mean to derive a
+  // per-channel tolerance. A tight tolerance keeps fine edge detail sharp.
+  let devR = 0, devG = 0, devB = 0;
+  n = 0;
+  for (let x = 0; x < w; x += stepX) {
+    for (const y of [0, h - 1]) {
+      const i = (y * w + x) * 4;
+      devR += Math.abs(px[i] - bgR);
+      devG += Math.abs(px[i + 1] - bgG);
+      devB += Math.abs(px[i + 2] - bgB);
+      n++;
+    }
+  }
+  for (let y = 1; y < h - 1; y += stepY) {
+    for (const x of [0, w - 1]) {
+      const i = (y * w + x) * 4;
+      devR += Math.abs(px[i] - bgR);
+      devG += Math.abs(px[i + 1] - bgG);
+      devB += Math.abs(px[i + 2] - bgB);
+      n++;
+    }
+  }
+
+  const tolR = Math.max(35, Math.min(90, devR / n * 2.5));
+  const tolG = Math.max(35, Math.min(90, devG / n * 2.5));
+  const tolB = Math.max(35, Math.min(90, devB / n * 2.5));
+
+  // Build a soft alpha mask: pixels close to the background color become
+  // transparent; pixels far away stay opaque. The transition zone between
+  // the two is feathered so edges don't look jagged.
+  const mask = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const idx = i * 4;
+    const dr = Math.abs(px[idx] - bgR) / tolR;
+    const dg = Math.abs(px[idx + 1] - bgG) / tolG;
+    const db = Math.abs(px[idx + 2] - bgB) / tolB;
+    const d = Math.max(dr, dg, db);
+    // d <= 0.7 → fully transparent; d >= 1.3 → fully opaque
+    if (d < 1.3) {
+      mask[i] = d <= 0.7 ? 0 : Math.round(((d - 0.7) / 0.6) * 255);
+    } else {
+      mask[i] = 255;
+    }
+  }
+
+  // Feather the mask along the edges of the subject so partially-covered
+  // background pixels at the silhouette transition smoothly.
+  const featherPass = (passes: number): void => {
+    const tmp = new Uint8Array(w * h);
+    for (let p = 0; p < passes; p++) {
+      tmp.set(mask);
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const i = y * w + x;
+          if (mask[i] === 0 || mask[i] === 255) continue;
+          const sum =
+            tmp[i - 1] + tmp[i + 1] + tmp[i - w] + tmp[i + w];
+          mask[i] = (sum + 2) >> 2;
+        }
+      }
+    }
+  };
+  featherPass(2);
+
+  // Apply the mask to the image's alpha channel.
+  for (let i = 0; i < w * h; i++) {
+    const a = mask[i];
+    if (a < 255) {
+      px[i * 4 + 3] = (px[i * 4 + 3] * a) / 255;
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return canvas;
+}
+
 export function captureVideoFrame(videoUrl: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
@@ -2026,11 +2143,16 @@ async function processVideoRealtime(
   const plan = maskDataUrl ? await buildInpaintPlan(maskDataUrl, w, h, 60) : null;
   const filter = buildEnhanceFilter(presetName, ctrl);
 
-  const stream = canvas.captureStream(30);
+  // Capture every drawn frame so the recording matches the source cadence.
+  // The draw loop below only pushes frames when currentTime actually changes,
+  // avoiding duplicate work and judder.
+  const stream = canvas.captureStream(0);
 
   // Route the element's audio into the recording without playing it aloud
   // (the source node is connected to the recording destination only, never
-  // to the speakers).
+  // to the speakers). WebAudio captures the decoded audio buffer regardless
+  // of the mute flag, so muting the video later for autoplay won't silence
+  // the recording track.
   let audioCtx: AudioContext | null = null;
   try {
     audioCtx = new AudioContext();
@@ -2044,12 +2166,22 @@ async function processVideoRealtime(
     audioCtx = null;
   }
 
-  const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
-    ? "video/webm;codecs=vp9,opus"
-    : MediaRecorder.isTypeSupported("video/webm")
-      ? "video/webm"
-      : "";
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  // Higher bitrate for better quality on the realtime path.
+  const mimeTypes = [
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+  ];
+  let mimeType = "";
+  let recorderOptions: Record<string, unknown> = { videoBitsPerSecond: 8000000 };
+  for (const mt of mimeTypes) {
+    if (MediaRecorder.isTypeSupported(mt)) {
+      mimeType = mt;
+      recorderOptions = { mimeType: mt, videoBitsPerSecond: 8000000 };
+      break;
+    }
+  }
+  const recorder = new MediaRecorder(stream, recorderOptions);
 
   const chunks: Blob[] = [];
   recorder.ondataavailable = (e) => {
@@ -2090,7 +2222,7 @@ async function processVideoRealtime(
     if (video.readyState >= 2) drawFrame();
   }
 
-  recorder.start(500);
+  recorder.start(1000);
   try {
     await video.play();
   } catch {
@@ -2098,9 +2230,17 @@ async function processVideoRealtime(
     await video.play();
   }
 
+  // Track currentTime to skip duplicate frames and avoid judder.
+  // requestAnimationFrame often fires faster than the video frame rate,
+  // so drawing the same frame twice wastes CPU and can confuse the encoder.
   let rafId = 0;
+  let lastFrameTime = -1;
   const frameLoop = () => {
-    drawFrame();
+    const ct = video.currentTime;
+    if (ct !== lastFrameTime) {
+      drawFrame();
+      lastFrameTime = ct;
+    }
     rafId = requestAnimationFrame(frameLoop);
   };
   rafId = requestAnimationFrame(frameLoop);
@@ -2124,7 +2264,8 @@ async function processVideoRealtime(
   }
   if (onProgress) onProgress(100);
 
-  const blob = new Blob(chunks, { type: "video/webm" });
+  const mimeBase = mimeType.startsWith("video/webm") ? "video/webm" : "video/mp4";
+  const blob = new Blob(chunks, { type: mimeBase });
   if (!blob.size) throw new Error("Video encoding produced no data");
   return blob;
 }

@@ -18,6 +18,7 @@ import {
   formatBytes,
   generateSampleImage,
   removeBackgroundFromImage,
+  autoRemoveBackgroundFromImage,
   removeWatermarkFromImage,
   captureVideoFrame,
 } from "@/lib/enhance";
@@ -28,8 +29,8 @@ type Preset = "light" | "standard" | "maximum";
 type Resolution = "original" | "2x" | "4x" | "8k";
 type Phase = "upload" | "settings" | "brush" | "processing" | "result";
 
-export default function UploadZone() {
-  const [mode, setMode] = useState<Mode>("watermark");
+export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
+  const [mode] = useState<Mode>(initialMode);
   const [tab, setTab] = useState<Tab>("image");
   const [file, setFile] = useState<File | null>(null);
   const [fileURL, setFileURL] = useState<string | null>(null);
@@ -82,10 +83,16 @@ export default function UploadZone() {
     setEnhancedURL(null);
     setEnhancedBlob(null);
     setProgress(0);
-    const needsBrush = mode === "watermark" || mode === "background";
+
+    if (mode === "background" && type === "image") {
+      // Auto remove background immediately — no brush needed.
+      processBackgroundImage(f, url);
+      return;
+    }
+
+    const needsBrush = mode === "watermark";
     setPhase(needsBrush ? "brush" : "settings");
     if (needsBrush && type === "video") {
-      // The brush tool needs a still image — grab the first video frame.
       captureVideoFrame(url)
         .then(setPosterURL)
         .catch(() => setError("Could not read the first video frame. Try a different file."));
@@ -121,14 +128,37 @@ export default function UploadZone() {
     setPhase("upload");
   };
 
-  const switchMode = (m: Mode) => {
-    if (m === mode) return;
-    reset();
-    setMode(m);
-    if (m === "background") setTab("image");
-  };
-
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  const processBackgroundImage = async (f: File, url: string) => {
+    setPhase("processing");
+    setProgress(0);
+    setError(null);
+    try {
+      const img = new Image();
+      img.src = url;
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Failed to load image"));
+      });
+      setProgress(20);
+      await sleep(100);
+      setProgress(40);
+
+      const canvas = await autoRemoveBackgroundFromImage(img);
+      setProgress(70);
+      await sleep(150);
+      const blob = await canvasToBlob(canvas, "image/png");
+      setEnhancedBlob(blob);
+      setEnhancedURL(URL.createObjectURL(blob));
+      setProgress(100);
+      await sleep(300);
+      setPhase("result");
+    } catch (err) {
+      setError(`Background removal failed: ${(err as Error).message}. Try a different image.`);
+      setPhase("upload");
+    }
+  };
 
   const processImage = async () => {
     if (!file || !fileURL) return;
@@ -158,7 +188,6 @@ export default function UploadZone() {
       setProgress(70);
       await sleep(200);
 
-      // Background removal needs the alpha channel — always PNG there.
       const fmt = mode === "background"
         ? "image/png"
         : file.type === "image/jpeg"
@@ -187,8 +216,6 @@ export default function UploadZone() {
     setError(null);
 
     try {
-      // Watermark mode only repairs the brushed region — no enhancement,
-      // no rescaling of the rest of the video.
       const blob = mode === "watermark"
         ? await processVideo(file, fileURL, "none", "original", undefined, (pct) => {
             setProgress(pct);
@@ -217,7 +244,6 @@ export default function UploadZone() {
     const url = enhancedURL || URL.createObjectURL(enhancedBlob);
     const a = document.createElement("a");
     const baseName = file.name.replace(/\.[^/.]+$/, "");
-    // Extension must match what was actually encoded, not the input file.
     const ext = enhancedBlob.type.includes("mp4")
       ? "mp4"
       : enhancedBlob.type.startsWith("video/")
@@ -298,7 +324,7 @@ export default function UploadZone() {
               </div>
               <div>
                 <p className="text-sm font-semibold mb-2 text-indigo-500">After</p>
-                <div className="result-preview p-2">
+                <div className={`result-preview p-2 ${mode === "background" ? "bg-checkerboard" : ""}`}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={enhancedURL} className="rounded-lg w-full" alt="Enhanced" />
                 </div>
@@ -382,8 +408,18 @@ export default function UploadZone() {
 
   // ---- SETTINGS VIEW ----
   if (phase === "settings" && file) {
+    // Build a CSS filter string for the live preview. Sharpness is excluded
+    // because CSS has no sharpen filter — it's applied during the final pass.
+    const p = (PRESETS[preset] ?? PRESETS.standard) as {
+      brightness: number; contrast: number; saturation: number;
+    };
+    const b = 1 + (p.brightness + controls.brightness) / 100;
+    const c = 1 + (p.contrast + controls.contrast) / 100;
+    const s = 1 + (p.saturation + controls.saturation) / 100;
+    const liveFilter = `brightness(${b.toFixed(2)}) contrast(${c.toFixed(2)}) saturate(${s.toFixed(2)})`;
+
     return (
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <div className="glass rounded-2xl p-6 md:p-8">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-bold">Processing Settings</h3>
@@ -392,87 +428,180 @@ export default function UploadZone() {
             </button>
           </div>
 
-          <div className="mb-6 result-preview p-3">
-            {fileType === "image" ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={fileURL || ""} className="max-h-64 rounded-xl mx-auto" alt="Preview" />
-            ) : (
-              <video src={fileURL || ""} controls className="max-h-64 rounded-xl mx-auto w-full" />
-            )}
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 text-center">{file.name} ({formatBytes(file.size)})</p>
-          </div>
-
-          <div className="mb-6">
-            <label className="block text-sm font-semibold mb-3">Enhancement Preset</label>
-            <div className="grid grid-cols-3 gap-3">
-              {(["light", "standard", "maximum"] as Preset[]).map((p) => (
-                <button
-                  key={p}
-                  className={`preset-btn ${preset === p ? "active" : ""}`}
-                  onClick={() => setPreset(p)}
-                >
-                  <div className="flex justify-center mb-1">
-                    <Icon name={p === "light" ? "sun" : p === "standard" ? "zap" : "wand"} size={20} />
-                  </div>
-                  <div className="text-sm font-medium">{p === "light" ? "Light" : p === "standard" ? "Standard" : "Maximum"}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    {p === "light" ? "Mild enhancement" : p === "standard" ? "Balanced boost" : "Aggressive"}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mb-6">
-            <label className="block text-sm font-semibold mb-3">Output Resolution</label>
-            <div className="flex flex-wrap gap-2">
-              {resOptions.map((r) => (
-                <button
-                  key={r}
-                  className={`res-btn ${resolution === r ? "active" : ""}`}
-                  onClick={() => setResolution(r)}
-                >
-                  {resLabel[r]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mb-6">
-            <label className="block text-sm font-semibold mb-3">Advanced Controls</label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {([
-                { label: "Brightness", key: "brightness" as const, min: -50, max: 50, icon: "sun" as const },
-                { label: "Contrast", key: "contrast" as const, min: -50, max: 50, icon: "contrast" as const },
-                { label: "Saturation", key: "saturation" as const, min: -50, max: 50, icon: "droplet" as const },
-                { label: "Sharpness", key: "sharpness" as const, min: 0, max: 100, icon: "blur" as const },
-              ]).map((ctrl) => (
-                <div key={ctrl.key}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="flex items-center gap-1.5">
-                      <Icon name={ctrl.icon} size={14} /> {ctrl.label}
-                    </span>
-                    <span className="text-gray-500">{controls[ctrl.key]}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={ctrl.min}
-                    max={ctrl.max}
-                    value={controls[ctrl.key]}
-                    onChange={(e) =>
-                      setControls({ ...controls, [ctrl.key]: parseInt(e.target.value) })
-                    }
+          {fileType === "image" ? (
+            /* ---- Image: two-column live preview ---- */
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+              {/* Preview — takes 3/5 of the width */}
+              <div className="lg:col-span-3">
+                <p className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">Live Preview</p>
+                <div className="result-preview bg-checkerboard">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={fileURL || ""}
+                    className="w-full rounded-lg"
+                    alt="Live preview"
+                    style={{ filter: liveFilter }}
                   />
                 </div>
-              ))}
-            </div>
-          </div>
+                <p className="text-xs text-gray-400 mt-1.5 text-center">{file.name} ({formatBytes(file.size)})</p>
+              </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">
-            <button className="btn-primary text-base px-8 py-3" onClick={handleProcess}>
-              <Icon name="wand" size={18} /> Enhance {fileType === "image" ? "Image" : "Video"}
-            </button>
-          </div>
+              {/* Controls — takes 2/5 of the width */}
+              <div className="lg:col-span-2 space-y-5">
+                <div>
+                  <label className="block text-xs font-semibold mb-2">Enhancement Preset</label>
+                  <div className="grid grid-cols-1 gap-2">
+                    {(["light", "standard", "maximum"] as Preset[]).map((p) => (
+                      <button
+                        key={p}
+                        className={`preset-btn flex items-center gap-3 py-2.5 ${preset === p ? "active" : ""}`}
+                        onClick={() => setPreset(p)}
+                      >
+                        <Icon name={p === "light" ? "sun" : p === "standard" ? "zap" : "wand"} size={16} />
+                        <div className="text-left">
+                          <div className="text-sm font-medium">{p === "light" ? "Light" : p === "standard" ? "Standard" : "Maximum"}</div>
+                          <div className="text-xs text-gray-400">
+                            {p === "light" ? "Mild enhancement" : p === "standard" ? "Balanced boost" : "Aggressive"}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold mb-2">Output Resolution</label>
+                  <div className="flex flex-wrap gap-2">
+                    {resOptions.map((r) => (
+                      <button
+                        key={r}
+                        className={`res-btn text-xs ${resolution === r ? "active" : ""}`}
+                        onClick={() => setResolution(r)}
+                      >
+                        {resLabel[r]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold mb-2">Fine-Tune</label>
+                  <div className="space-y-3">
+                    {([
+                      { label: "Brightness", key: "brightness" as const, min: -50, max: 50, icon: "sun" as const },
+                      { label: "Contrast", key: "contrast" as const, min: -50, max: 50, icon: "contrast" as const },
+                      { label: "Saturation", key: "saturation" as const, min: -50, max: 50, icon: "droplet" as const },
+                      { label: "Sharpness *", key: "sharpness" as const, min: 0, max: 100, icon: "blur" as const },
+                    ]).map((ctrl) => (
+                      <div key={ctrl.key}>
+                        <div className="flex justify-between text-xs mb-0.5">
+                          <span className="flex items-center gap-1 text-gray-600 dark:text-gray-400">
+                            <Icon name={ctrl.icon} size={12} /> {ctrl.label}
+                          </span>
+                          <span className="text-gray-500 font-mono">{controls[ctrl.key] > 0 ? "+" : ""}{controls[ctrl.key]}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={ctrl.min}
+                          max={ctrl.max}
+                          value={controls[ctrl.key]}
+                          onChange={(e) =>
+                            setControls({ ...controls, [ctrl.key]: parseInt(e.target.value) })
+                          }
+                          className="w-full"
+                        />
+                      </div>
+                    ))}
+                    <p className="text-[10px] text-gray-400 italic">* Sharpness is applied during final processing</p>
+                  </div>
+                </div>
+
+                <button className="btn-primary text-sm px-6 py-2.5 w-full justify-center" onClick={handleProcess}>
+                  <Icon name="wand" size={16} /> Enhance Image
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* ---- Video: stacked layout (no live preview — too expensive) ---- */
+            <div>
+              <div className="mb-6 result-preview p-3">
+                <video src={fileURL || ""} controls className="max-h-64 rounded-xl mx-auto w-full" />
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 text-center">{file.name} ({formatBytes(file.size)})</p>
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-sm font-semibold mb-3">Enhancement Preset</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(["light", "standard", "maximum"] as Preset[]).map((p) => (
+                    <button
+                      key={p}
+                      className={`preset-btn ${preset === p ? "active" : ""}`}
+                      onClick={() => setPreset(p)}
+                    >
+                      <div className="flex justify-center mb-1">
+                        <Icon name={p === "light" ? "sun" : p === "standard" ? "zap" : "wand"} size={20} />
+                      </div>
+                      <div className="text-sm font-medium">{p === "light" ? "Light" : p === "standard" ? "Standard" : "Maximum"}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {p === "light" ? "Mild enhancement" : p === "standard" ? "Balanced boost" : "Aggressive"}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-sm font-semibold mb-3">Output Resolution</label>
+                <div className="flex flex-wrap gap-2">
+                  {resOptions.map((r) => (
+                    <button
+                      key={r}
+                      className={`res-btn ${resolution === r ? "active" : ""}`}
+                      onClick={() => setResolution(r)}
+                    >
+                      {resLabel[r]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-sm font-semibold mb-3">Advanced Controls</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {([
+                    { label: "Brightness", key: "brightness" as const, min: -50, max: 50, icon: "sun" as const },
+                    { label: "Contrast", key: "contrast" as const, min: -50, max: 50, icon: "contrast" as const },
+                    { label: "Saturation", key: "saturation" as const, min: -50, max: 50, icon: "droplet" as const },
+                    { label: "Sharpness", key: "sharpness" as const, min: 0, max: 100, icon: "blur" as const },
+                  ]).map((ctrl) => (
+                    <div key={ctrl.key}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="flex items-center gap-1.5">
+                          <Icon name={ctrl.icon} size={14} /> {ctrl.label}
+                        </span>
+                        <span className="text-gray-500">{controls[ctrl.key]}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={ctrl.min}
+                        max={ctrl.max}
+                        value={controls[ctrl.key]}
+                        onChange={(e) =>
+                          setControls({ ...controls, [ctrl.key]: parseInt(e.target.value) })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">
+                <button className="btn-primary text-base px-8 py-3" onClick={handleProcess}>
+                  <Icon name="wand" size={18} /> Enhance Video
+                </button>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="mt-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-sm text-center">
@@ -487,28 +616,6 @@ export default function UploadZone() {
   // ---- UPLOAD VIEW (default) ----
   return (
     <div className="max-w-2xl mx-auto">
-      {/* Mode tabs */}
-      <div className="flex gap-2 justify-center mb-6 p-1 rounded-xl bg-gray-100 dark:bg-gray-900 max-w-md mx-auto">
-        <button
-          className={`tab-btn flex items-center gap-1.5 flex-1 ${mode === "watermark" ? "active" : ""}`}
-          onClick={() => switchMode("watermark")}
-        >
-          <Icon name="eraser" size={16} /> Remove Watermark
-        </button>
-        <button
-          className={`tab-btn flex items-center gap-1.5 flex-1 ${mode === "background" ? "active" : ""}`}
-          onClick={() => switchMode("background")}
-        >
-          <Icon name="brush" size={16} /> Remove Background
-        </button>
-        <button
-          className={`tab-btn flex items-center gap-1.5 flex-1 ${mode === "enhance" ? "active" : ""}`}
-          onClick={() => switchMode("enhance")}
-        >
-          <Icon name="wand" size={16} /> Enhance Quality
-        </button>
-      </div>
-
       {/* File type tabs */}
       <div className="flex gap-2 justify-center mb-6 p-1 rounded-xl bg-gray-100 dark:bg-gray-900 max-w-xs mx-auto">
         {mode === "background" ? (

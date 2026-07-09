@@ -2,13 +2,16 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Watermark Remover — Remove Watermarks from Images & Videos Free Online",
+  title: "Sharpify — Remove Watermarks, Backgrounds & Enhance Images & Videos Free Online",
   description:
-    "Remove watermarks, logos, text, and objects from images and videos online free. AI-powered watermark removal, deblurring, upscaling to 4K/8K. No signup required.",
+    "Remove watermarks, logos, text, and objects from images and videos online free. Remove image backgrounds and enhance quality to 4K/8K. No signup required. 100% free.",
   keywords: [
     "watermark remover",
     "remove watermark from image",
     "remove watermark from video",
+    "background remover",
+    "image enhancer",
+    "video enhancer",
     "AI watermark removal",
     "image deblur",
     "video upscaler",
@@ -17,20 +20,21 @@ export const metadata: Metadata = {
     "blur removal",
     "logo remover",
     "text remover from image",
+    "Sharpify",
   ],
-  authors: [{ name: "Watermark Remover" }],
-  alternates: { canonical: "https://watermark-remover.app/" },
+  authors: [{ name: "Sharpify" }],
+  alternates: { canonical: "https://sharpify.app/" },
   openGraph: {
     type: "website",
-    url: "https://watermark-remover.app/",
-    title: "Watermark Remover — Remove Watermarks from Images & Videos Free Online",
+    url: "https://sharpify.app/",
+    title: "Sharpify — Remove Watermarks, Backgrounds & Enhance Images & Videos Free Online",
     description:
-      "Remove watermarks, logos, text, and objects from images and videos online free. AI-powered enhancement with no signup required.",
-    siteName: "Watermark Remover",
+      "Remove watermarks, logos, text, and objects from images and videos online free. AI-powered background removal and enhancement with no signup required.",
+    siteName: "Sharpify",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Watermark Remover — Remove Watermarks from Images & Videos",
+    title: "Sharpify — Remove Watermarks, Backgrounds & Enhance Images & Videos",
     description:
       "Remove watermarks, logos, text, and objects from images and videos online free. No signup required.",
   },
@@ -43,10 +47,10 @@ export default function RootLayout({
   const jsonLdWebApp = {
     "@context": "https://schema.org",
     "@type": "WebApplication",
-    name: "Watermark Remover",
-    url: "https://watermark-remover.app",
+    name: "Sharpify",
+    url: "https://sharpify.app",
     description:
-      "Free online watermark removal tool for images and videos. Remove logos, text, and objects with AI-powered technology.",
+      "Free online watermark removal, background removal, and image/video enhancement tool. Remove logos, text, and objects with AI-powered technology.",
     applicationCategory: "MultimediaApplication",
     operatingSystem: "Web",
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
@@ -63,18 +67,18 @@ export default function RootLayout({
     mainEntity: [
       {
         "@type": "Question",
-        name: "Is Watermark Remover free?",
+        name: "Is Sharpify free?",
         acceptedAnswer: {
           "@type": "Answer",
-          text: "Yes! Watermark Remover is completely free to use. No signup or account needed. Just upload your file and remove watermarks instantly.",
+          text: "Yes! Sharpify is completely free to use. No signup or account needed. Just upload your file and remove watermarks, backgrounds, or enhance quality instantly.",
         },
       },
       {
         "@type": "Question",
-        name: "How long does watermark removal take?",
+        name: "How does watermark removal work?",
         acceptedAnswer: {
           "@type": "Answer",
-          text: "Most image watermark removals complete in under 10 seconds. Video processing time depends on file size and resolution, typically 30 seconds to a few minutes.",
+          text: "Upload your file and use the brush tool to mark the watermark area. The tool processes the region and fills it naturally using the surrounding pixels, leaving the background intact.",
         },
       },
       {
@@ -87,18 +91,18 @@ export default function RootLayout({
       },
       {
         "@type": "Question",
-        name: "Are uploaded files secure?",
+        name: "Are my files private?",
         acceptedAnswer: {
           "@type": "Answer",
-          text: "Yes. All uploads are processed entirely in your browser. Nothing is sent to any server. Your files never leave your device.",
+          text: "Absolutely. Everything runs in your browser using Canvas API and WebCodecs. No files are ever uploaded to any server. Your files never leave your device.",
         },
       },
       {
         "@type": "Question",
-        name: "Do files get deleted automatically?",
+        name: "Can I remove watermarks from videos?",
         acceptedAnswer: {
           "@type": "Answer",
-          text: "Since everything runs in your browser, no files are ever uploaded to our servers. Your privacy is fully protected.",
+          text: "Yes. Upload a video, use the brush tool to mark the watermark area on the first frame, and the tool will process the entire video frame by frame while preserving audio and original duration.",
         },
       },
     ],
@@ -109,7 +113,7 @@ export default function RootLayout({
       <head>
         <link
           rel="icon"
-          href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>W</text></svg>"
+          href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' y1='0' x2='100' y2='100'><stop offset='0%' stopColor='%236366f1'/><stop offset='50%' stopColor='%23a855f7'/><stop offset='100%' stopColor='%23ec4899'/></linearGradient></defs><circle cx='50' cy='50' r='40' fill='url(%23g)'/><path d='M35 50h30M50 35v30' stroke='white' strokeWidth='6' strokeLinecap='round'/></svg>"
         />
         <script
           type="application/ld+json"
