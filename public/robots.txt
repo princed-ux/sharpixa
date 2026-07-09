@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://watermark-remover.app/sitemap.xml

@@ -1,0 +1,583 @@
+"use client";
+
+import { useState, useRef, useCallback } from "react";
+import { Icon } from "@/components/Icons";
+import WatermarkBrush from "@/components/WatermarkBrush";
+import {
+  IMAGE_FORMATS,
+  VIDEO_FORMATS,
+  FILE_LIMITS,
+  PRESETS,
+  DEFAULT_CONTROLS,
+  type AdvancedControls,
+} from "@/lib/constants";
+import {
+  enhanceImage,
+  processVideo,
+  canvasToBlob,
+  formatBytes,
+  generateSampleImage,
+  removeBackgroundFromImage,
+  removeWatermarkFromImage,
+  captureVideoFrame,
+} from "@/lib/enhance";
+
+type Mode = "watermark" | "enhance" | "background";
+type Tab = "image" | "video";
+type Preset = "light" | "standard" | "maximum";
+type Resolution = "original" | "2x" | "4x" | "8k";
+type Phase = "upload" | "settings" | "brush" | "processing" | "result";
+
+export default function UploadZone() {
+  const [mode, setMode] = useState<Mode>("watermark");
+  const [tab, setTab] = useState<Tab>("image");
+  const [file, setFile] = useState<File | null>(null);
+  const [fileURL, setFileURL] = useState<string | null>(null);
+  const [posterURL, setPosterURL] = useState<string | null>(null);
+  const [fileType, setFileType] = useState<Tab>("image");
+  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
+  const [preset, setPreset] = useState<Preset>("standard");
+  const [resolution, setResolution] = useState<Resolution>("original");
+  const [phase, setPhase] = useState<Phase>("upload");
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [enhancedURL, setEnhancedURL] = useState<string | null>(null);
+  const [enhancedBlob, setEnhancedBlob] = useState<Blob | null>(null);
+  const [controls, setControls] = useState<AdvancedControls>(DEFAULT_CONTROLS);
+  const [dragover, setDragover] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const limits = FILE_LIMITS;
+
+  const handleFile = useCallback((f: File) => {
+    const ext = (f.name.split(".").pop() || "").toLowerCase();
+    const isImage = IMAGE_FORMATS.includes(ext as any) || f.type.startsWith("image/");
+    const isVideo = VIDEO_FORMATS.includes(ext as any) || f.type.startsWith("video/");
+
+    if (!isImage && !isVideo) {
+      setError("Unsupported file format. Please upload an image (JPG, PNG, WEBP) or video (MP4, MOV, AVI, WEBM, MKV).");
+      return;
+    }
+
+    const type = isImage ? "image" : "video";
+    if (mode === "background" && type === "video") {
+      setError("Background removal works with images only. Please upload a JPG, PNG, or WEBP file.");
+      return;
+    }
+    if (f.size > limits[type]) {
+      const limitMB = Math.round(limits[type] / (1024 * 1024));
+      setError(`File too large. Maximum size is ${limitMB}MB.`);
+      return;
+    }
+
+    setError(null);
+    setFile(f);
+    setFileType(type);
+    setTab(type);
+    setMaskDataUrl(null);
+    setPosterURL(null);
+    if (fileURL) URL.revokeObjectURL(fileURL);
+    const url = URL.createObjectURL(f);
+    setFileURL(url);
+    setEnhancedURL(null);
+    setEnhancedBlob(null);
+    setProgress(0);
+    const needsBrush = mode === "watermark" || mode === "background";
+    setPhase(needsBrush ? "brush" : "settings");
+    if (needsBrush && type === "video") {
+      // The brush tool needs a still image — grab the first video frame.
+      captureVideoFrame(url)
+        .then(setPosterURL)
+        .catch(() => setError("Could not read the first video frame. Try a different file."));
+    }
+  }, [fileURL, mode, limits]);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragover(false);
+    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  }, [handleFile]);
+
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.length) handleFile(e.target.files[0]);
+  };
+
+  const loadSample = async () => {
+    const sample = await generateSampleImage();
+    handleFile(sample);
+  };
+
+  const reset = () => {
+    if (fileURL) URL.revokeObjectURL(fileURL);
+    if (enhancedURL && enhancedURL.startsWith("blob:")) URL.revokeObjectURL(enhancedURL);
+    setFile(null);
+    setFileURL(null);
+    setPosterURL(null);
+    setEnhancedURL(null);
+    setEnhancedBlob(null);
+    setMaskDataUrl(null);
+    setProgress(0);
+    setError(null);
+    setPhase("upload");
+  };
+
+  const switchMode = (m: Mode) => {
+    if (m === mode) return;
+    reset();
+    setMode(m);
+    if (m === "background") setTab("image");
+  };
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  const processImage = async () => {
+    if (!file || !fileURL) return;
+    setPhase("processing");
+    setProgress(0);
+    setError(null);
+
+    try {
+      const img = new Image();
+      img.src = fileURL;
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Failed to load image"));
+      });
+
+      setProgress(15);
+      await sleep(200);
+      setProgress(35);
+      await sleep(150);
+
+      const canvas = mode === "background"
+        ? await removeBackgroundFromImage(img, maskDataUrl)
+        : mode === "watermark"
+          ? await removeWatermarkFromImage(img, maskDataUrl)
+          : await enhanceImage(img, preset, resolution, controls, maskDataUrl);
+
+      setProgress(70);
+      await sleep(200);
+
+      // Background removal needs the alpha channel — always PNG there.
+      const fmt = mode === "background"
+        ? "image/png"
+        : file.type === "image/jpeg"
+          ? "image/jpeg"
+          : "image/png";
+      const blob = await canvasToBlob(canvas, fmt);
+      setEnhancedBlob(blob);
+      setEnhancedURL(URL.createObjectURL(blob));
+
+      setProgress(90);
+      await sleep(150);
+      setProgress(100);
+      await sleep(300);
+
+      setPhase("result");
+    } catch (err) {
+      setError(`Processing failed: ${(err as Error).message}. Please try again.`);
+      setPhase(mode === "enhance" ? "settings" : "brush");
+    }
+  };
+
+  const processVideoFile = async () => {
+    if (!file || !fileURL) return;
+    setPhase("processing");
+    setProgress(0);
+    setError(null);
+
+    try {
+      // Watermark mode only repairs the brushed region — no enhancement,
+      // no rescaling of the rest of the video.
+      const blob = mode === "watermark"
+        ? await processVideo(file, fileURL, "none", "original", undefined, (pct) => {
+            setProgress(pct);
+          }, maskDataUrl)
+        : await processVideo(file, fileURL, preset, resolution, controls, (pct) => {
+            setProgress(pct);
+          }, maskDataUrl);
+      setEnhancedBlob(blob);
+      setEnhancedURL(URL.createObjectURL(blob));
+      setProgress(100);
+      await sleep(300);
+      setPhase("result");
+    } catch (err) {
+      setError(`Video processing failed: ${(err as Error).message}. Please try again.`);
+      setPhase(mode === "enhance" ? "settings" : "brush");
+    }
+  };
+
+  const handleProcess = () => {
+    if (fileType === "image") processImage();
+    else processVideoFile();
+  };
+
+  const handleDownload = () => {
+    if (!enhancedBlob || !file) return;
+    const url = enhancedURL || URL.createObjectURL(enhancedBlob);
+    const a = document.createElement("a");
+    const baseName = file.name.replace(/\.[^/.]+$/, "");
+    // Extension must match what was actually encoded, not the input file.
+    const ext = enhancedBlob.type.includes("mp4")
+      ? "mp4"
+      : enhancedBlob.type.startsWith("video/")
+        ? "webm"
+        : enhancedBlob.type === "image/jpeg"
+          ? "jpg"
+          : "png";
+    const suffix = mode === "watermark" ? "clean" : mode === "background" ? "no-bg" : "enhanced";
+    a.href = url;
+    a.download = `${baseName}_${suffix}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const acceptAttr = tab === "image" ? ".jpg,.jpeg,.png,.webp,image/*" : ".mp4,.mov,.avi,.webm,.mkv,video/*";
+
+  const resOptions: Resolution[] = fileType === "video" ? ["original", "2x", "4x", "8k"] : ["original", "2x", "4x"];
+
+  const resLabel: Record<Resolution, string> = {
+    original: "Original",
+    "2x": "2K Upscale",
+    "4x": "4K Upscale",
+    "8k": "8K Upscale",
+  };
+
+  // ---- PROCESSING VIEW ----
+  if (phase === "processing") {
+    const steps = [
+      { label: "Loading file...", threshold: 15 },
+      { label: "Analyzing content...", threshold: 35 },
+      { label: fileType === "image" ? "Processing image..." : "Processing video frames...", threshold: 70 },
+      { label: "Finalizing output...", threshold: 90 },
+      { label: "Complete!", threshold: 100 },
+    ];
+    const currentStep = steps.find((s) => progress <= s.threshold) || steps[steps.length - 1];
+
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="glass rounded-2xl p-8 md:p-12 text-center">
+          <div className="spinner mx-auto mb-6" />
+          <h3 className="text-xl font-bold mb-2">
+            {mode === "watermark" ? "Removing watermark..." : mode === "background" ? "Removing background..." : "Enhancing your " + fileType + "..."}
+          </h3>
+          <p className="text-gray-500 dark:text-gray-400 mb-6">{currentStep.label}</p>
+          <div className="progress-bar max-w-md mx-auto mb-3">
+            <div className="progress-fill" style={{ width: `${progress}%` }} />
+          </div>
+          <p className="text-sm font-semibold text-indigo-500">{progress}%</p>
+          {fileType === "video" && (
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">
+              The video is processed frame by frame on your device — keep this tab open until it finishes.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---- RESULT VIEW ----
+  if (phase === "result" && enhancedURL) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="glass rounded-2xl p-6 md:p-8">
+          <div className="text-center mb-6">
+            <div className="badge mb-3"><span className="pulse-dot" /> Processing Complete</div>
+            <h3 className="text-xl font-bold">Your {fileType} is ready!</h3>
+          </div>
+
+          {fileType === "image" ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div>
+                <p className="text-sm font-semibold mb-2 text-gray-500 dark:text-gray-400">Before</p>
+                <div className="result-preview p-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={fileURL || ""} className="rounded-lg w-full" alt="Original" />
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-semibold mb-2 text-indigo-500">After</p>
+                <div className="result-preview p-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={enhancedURL} className="rounded-lg w-full" alt="Enhanced" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="result-preview p-3 mb-6">
+              <video src={enhancedURL} controls className="rounded-lg w-full" />
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button className="btn-primary text-base px-8 py-3" onClick={handleDownload}>
+              <Icon name="download" size={18} /> Download {fileType === "image" ? "Image" : "Video"}
+            </button>
+            <button className="btn-secondary text-base px-6 py-3" onClick={reset}>Process Another File</button>
+          </div>
+        </div>
+        <div className="ad-slot mt-6">Advertisement — Google AdSense (Results page native ad)</div>
+      </div>
+    );
+  }
+
+  // ---- BRUSH VIEW (watermark / background modes) ----
+  if (phase === "brush" && fileURL && (mode === "watermark" || mode === "background")) {
+    const isBg = mode === "background";
+    const brushImageUrl = fileType === "video" ? posterURL : fileURL;
+    return (
+      <div className="max-w-3xl mx-auto">
+        <div className="glass rounded-2xl p-6 md:p-8">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold">{isBg ? "Step 1: Mark Background Area" : "Step 1: Mark Watermark Area"}</h3>
+            <button className="text-sm text-gray-500 hover:text-red-500 flex items-center gap-1" onClick={reset}>
+              <Icon name="close" size={14} /> Remove
+            </button>
+          </div>
+
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            {isBg
+              ? "Paint over the background area you want to remove. The marked area will become transparent."
+              : "Paint over the watermark, logo, or text you want to remove. Watermarks are commonly at the bottom-right corner."}
+          </p>
+
+          {brushImageUrl ? (
+            <WatermarkBrush
+              imageUrl={brushImageUrl}
+              onMaskChange={setMaskDataUrl}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 mb-6">
+              <div className="spinner mb-4" />
+              <p className="text-sm text-gray-500 dark:text-gray-400">Reading first video frame...</p>
+            </div>
+          )}
+
+          {fileType === "video" && (
+            <p className="text-xs text-amber-500 mb-3 flex items-center gap-1">
+              <Icon name="wand" size={12} /> The marked area will be repaired across every frame of the video. The original length and sound are preserved.
+            </p>
+          )}
+
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-end mt-4">
+            {!maskDataUrl && (
+              <p className="text-xs text-gray-400 dark:text-gray-500 mr-auto">
+                Brush over the area first to continue.
+              </p>
+            )}
+            <button
+              className="btn-primary text-sm px-6 py-2.5"
+              onClick={handleProcess}
+              disabled={!maskDataUrl}
+              style={!maskDataUrl ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+            >
+              <Icon name={isBg ? "brush" : "eraser"} size={14} /> {isBg ? "Remove Background" : "Remove Watermark"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- SETTINGS VIEW ----
+  if (phase === "settings" && file) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <div className="glass rounded-2xl p-6 md:p-8">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-bold">Processing Settings</h3>
+            <button className="text-sm text-gray-500 hover:text-red-500 flex items-center gap-1" onClick={reset}>
+              <Icon name="close" size={14} /> Remove
+            </button>
+          </div>
+
+          <div className="mb-6 result-preview p-3">
+            {fileType === "image" ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={fileURL || ""} className="max-h-64 rounded-xl mx-auto" alt="Preview" />
+            ) : (
+              <video src={fileURL || ""} controls className="max-h-64 rounded-xl mx-auto w-full" />
+            )}
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 text-center">{file.name} ({formatBytes(file.size)})</p>
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-sm font-semibold mb-3">Enhancement Preset</label>
+            <div className="grid grid-cols-3 gap-3">
+              {(["light", "standard", "maximum"] as Preset[]).map((p) => (
+                <button
+                  key={p}
+                  className={`preset-btn ${preset === p ? "active" : ""}`}
+                  onClick={() => setPreset(p)}
+                >
+                  <div className="flex justify-center mb-1">
+                    <Icon name={p === "light" ? "sun" : p === "standard" ? "zap" : "wand"} size={20} />
+                  </div>
+                  <div className="text-sm font-medium">{p === "light" ? "Light" : p === "standard" ? "Standard" : "Maximum"}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    {p === "light" ? "Mild enhancement" : p === "standard" ? "Balanced boost" : "Aggressive"}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-sm font-semibold mb-3">Output Resolution</label>
+            <div className="flex flex-wrap gap-2">
+              {resOptions.map((r) => (
+                <button
+                  key={r}
+                  className={`res-btn ${resolution === r ? "active" : ""}`}
+                  onClick={() => setResolution(r)}
+                >
+                  {resLabel[r]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-sm font-semibold mb-3">Advanced Controls</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {([
+                { label: "Brightness", key: "brightness" as const, min: -50, max: 50, icon: "sun" as const },
+                { label: "Contrast", key: "contrast" as const, min: -50, max: 50, icon: "contrast" as const },
+                { label: "Saturation", key: "saturation" as const, min: -50, max: 50, icon: "droplet" as const },
+                { label: "Sharpness", key: "sharpness" as const, min: 0, max: 100, icon: "blur" as const },
+              ]).map((ctrl) => (
+                <div key={ctrl.key}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="flex items-center gap-1.5">
+                      <Icon name={ctrl.icon} size={14} /> {ctrl.label}
+                    </span>
+                    <span className="text-gray-500">{controls[ctrl.key]}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={ctrl.min}
+                    max={ctrl.max}
+                    value={controls[ctrl.key]}
+                    onChange={(e) =>
+                      setControls({ ...controls, [ctrl.key]: parseInt(e.target.value) })
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">
+            <button className="btn-primary text-base px-8 py-3" onClick={handleProcess}>
+              <Icon name="wand" size={18} /> Enhance {fileType === "image" ? "Image" : "Video"}
+            </button>
+          </div>
+
+          {error && (
+            <div className="mt-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-sm text-center">
+              {error}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---- UPLOAD VIEW (default) ----
+  return (
+    <div className="max-w-2xl mx-auto">
+      {/* Mode tabs */}
+      <div className="flex gap-2 justify-center mb-6 p-1 rounded-xl bg-gray-100 dark:bg-gray-900 max-w-md mx-auto">
+        <button
+          className={`tab-btn flex items-center gap-1.5 flex-1 ${mode === "watermark" ? "active" : ""}`}
+          onClick={() => switchMode("watermark")}
+        >
+          <Icon name="eraser" size={16} /> Remove Watermark
+        </button>
+        <button
+          className={`tab-btn flex items-center gap-1.5 flex-1 ${mode === "background" ? "active" : ""}`}
+          onClick={() => switchMode("background")}
+        >
+          <Icon name="brush" size={16} /> Remove Background
+        </button>
+        <button
+          className={`tab-btn flex items-center gap-1.5 flex-1 ${mode === "enhance" ? "active" : ""}`}
+          onClick={() => switchMode("enhance")}
+        >
+          <Icon name="wand" size={16} /> Enhance Quality
+        </button>
+      </div>
+
+      {/* File type tabs */}
+      <div className="flex gap-2 justify-center mb-6 p-1 rounded-xl bg-gray-100 dark:bg-gray-900 max-w-xs mx-auto">
+        {mode === "background" ? (
+          <button className="tab-btn active flex items-center gap-1.5 flex-1">
+            <Icon name="image" size={16} /> Image
+          </button>
+        ) : (
+          <>
+            <button
+              className={`tab-btn flex items-center gap-1.5 flex-1 ${tab === "image" ? "active" : ""}`}
+              onClick={() => setTab("image")}
+            >
+              <Icon name="image" size={16} /> Image
+            </button>
+            <button
+              className={`tab-btn flex items-center gap-1.5 flex-1 ${tab === "video" ? "active" : ""}`}
+              onClick={() => setTab("video")}
+            >
+              <Icon name="video" size={16} /> Video
+            </button>
+          </>
+        )}
+      </div>
+
+      <div
+        className={`dropzone glass ${dragover ? "dragover" : ""}`}
+        onClick={() => fileInputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setDragover(true); }}
+        onDragLeave={() => setDragover(false)}
+        onDrop={onDrop}
+      >
+        <div className="flex justify-center mb-4">
+          <Icon name={tab === "image" ? "image" : "film"} size={48} className="text-indigo-400" />
+        </div>
+        <p className="text-lg font-semibold mb-2">
+          {mode === "watermark"
+            ? "Drop your " + tab + " to remove watermarks"
+            : mode === "background"
+              ? "Drop your image to remove the background"
+              : "Drop your " + tab + " to enhance"}
+        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">or click to browse</p>
+        <button className="btn-primary">
+          <Icon name="upload" size={16} /> Upload File
+        </button>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-4">
+          {tab === "image"
+            ? "JPG \u00B7 JPEG \u00B7 PNG \u00B7 WEBP \u2014 Max 20MB"
+            : "MP4 \u00B7 MOV \u00B7 AVI \u00B7 WEBM \u00B7 MKV \u2014 Max 100MB"}
+        </p>
+      </div>
+
+      <div className="text-center mt-4">
+        <button className="btn-secondary text-sm" onClick={loadSample}>Try Sample File</button>
+      </div>
+
+      {error && (
+        <div className="mt-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-sm text-center">
+          {error}
+        </div>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        accept={acceptAttr}
+        onChange={onFileChange}
+      />
+    </div>
+  );
+}
