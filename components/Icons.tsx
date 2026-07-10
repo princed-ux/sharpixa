@@ -22,8 +22,7 @@ type IconName =
   | "sun"
   | "droplet"
   | "zap"
-  | "menu"
-  | "logo";
+  | "menu";
 
 export function Icon({
   name,
@@ -34,14 +33,14 @@ export function Icon({
   className?: string;
   size?: number;
 }) {
-  const common = {
+  const s = {
     className,
     width: size,
     height: size,
     viewBox: "0 0 24 24",
     fill: "none",
     stroke: "currentColor",
-    strokeWidth: 1.8,
+    strokeWidth: 2.2,
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
   };
@@ -49,197 +48,199 @@ export function Icon({
   switch (name) {
     case "sparkles":
       return (
-        <svg {...common}>
-          <path d="M12 3l1.4 4.1L17.5 9l-4.1 1.9L12 15l-1.4-4.1L6.5 9l4.1-1.9L12 3Z" />
-          <path d="M19 14l.7 2.3L22 17l-2.3.7L19 20l-.7-2.3L16 17l2.3-.7L19 14Z" />
+        <svg {...s}>
+          <path d="M9 3l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3Z" />
+          <path d="M17 7l.5 1.5L19 9l-1.5.5L17 11l-.5-1.5L15 9l1.5-.5L17 7Z" />
+          <path d="M5 17l.5 1.5L7 19l-1.5.5L5 21l-.5-1.5L3 19l1.5-.5L5 17Z" />
         </svg>
       );
     case "brush":
       return (
-        <svg {...common}>
-          <path d="M5 14.5c0-3.2 2.2-5.3 4.9-5.3 1.8 0 2.8 1 3.7 2.4.8 1.3 2.4 1.8 3.8 1.2.6-.3 1.1-.8 1.3-1.5" />
-          <path d="M5 14.5c0 2.5 2 4.5 4.5 4.5h2.5" />
-          <path d="M9.5 18.5v2.5" />
+        <svg {...s}>
+          <path d="M4 6l7 13" />
+          <path d="M20 6l-7 13" />
+          <circle cx="5.5" cy="5.5" r="2.5" />
+          <circle cx="18.5" cy="5.5" r="2.5" />
         </svg>
       );
     case "camera":
       return (
-        <svg {...common}>
-          <rect x="3" y="7" width="18" height="12" rx="3" />
+        <svg {...s}>
+          <rect x="3" y="7" width="18" height="13" rx="3" />
           <circle cx="12" cy="13" r="4" />
           <path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7" />
         </svg>
       );
     case "film":
       return (
-        <svg {...common}>
-          <rect x="3" y="5" width="18" height="14" rx="3" />
-          <path d="M7 5v14" />
-          <path d="M17 5v14" />
-          <path d="M3 10h18" />
-          <path d="M3 14h18" />
+        <svg {...s}>
+          <rect x="2" y="4" width="20" height="16" rx="2" />
+          <path d="M8 4v16" />
+          <path d="M16 4v16" />
+          <path d="M2 9h6" />
+          <path d="M16 9h6" />
+          <path d="M2 15h6" />
+          <path d="M16 15h6" />
         </svg>
       );
     case "sliders":
       return (
-        <svg {...common}>
-          <path d="M4 7h7" />
-          <path d="M13 7h7" />
-          <path d="M4 17h4" />
-          <path d="M10 17h10" />
-          <circle cx="10" cy="7" r="2" />
-          <circle cx="10" cy="17" r="2" />
+        <svg {...s}>
+          <path d="M4 7h5" />
+          <path d="M15 7h5" />
+          <path d="M4 17h3" />
+          <path d="M11 17h9" />
+          <circle cx="11" cy="7" r="2" />
+          <circle cx="8" cy="17" r="2" />
         </svg>
       );
     case "shield":
       return (
-        <svg {...common}>
-          <path d="M12 3 5 6v6c0 4.4 2.8 7.8 7 9 4.2-1.2 7-4.6 7-9V6l-7-3Z" />
+        <svg {...s}>
+          <path d="M12 2 5 5v6c0 4.5 2.8 8 7 9.5 4.2-1.5 7-5 7-9.5V5l-7-3Z" />
         </svg>
       );
     case "download":
       return (
-        <svg {...common}>
-          <path d="M12 4v10" />
-          <path d="m8 10 4 4 4-4" />
-          <path d="M5 18h14" />
+        <svg {...s}>
+          <path d="M12 3v12" />
+          <path d="m8 11 4 4 4-4" />
+          <path d="M4 18h16" />
+          <path d="M4 21h16" />
         </svg>
       );
     case "upload":
       return (
-        <svg {...common}>
-          <path d="M12 4v10" />
-          <path d="m8 8 4-4 4 4" />
-          <path d="M5 18h14" />
+        <svg {...s}>
+          <path d="M12 15V3" />
+          <path d="m8 7 4-4 4 4" />
+          <path d="M4 18h16" />
+          <path d="M4 21h16" />
         </svg>
       );
     case "refresh":
       return (
-        <svg {...common}>
-          <path d="M21 12a9 9 0 1 1-2.3-6.1" />
-          <path d="M21 3v6h-6" />
+        <svg {...s}>
+          <path d="M21 12a9 9 0 1 1-3-6.7" />
+          <path d="M21 3v5h-5" />
         </svg>
       );
     case "close":
       return (
-        <svg {...common}>
+        <svg {...s}>
           <path d="M6 6l12 12" />
           <path d="M18 6 6 18" />
         </svg>
       );
     case "image":
       return (
-        <svg {...common}>
-          <rect x="4" y="5" width="16" height="14" rx="2" />
-          <circle cx="9" cy="10" r="1.5" />
-          <path d="m8 15 3-3 3 3 2-2 2 2" />
+        <svg {...s}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <circle cx="8.5" cy="9.5" r="2" />
+          <path d="M3 16l4-4 3 3 3-3 4 4 4-2" />
         </svg>
       );
     case "video":
       return (
-        <svg {...common}>
-          <rect x="3" y="6" width="14" height="12" rx="2" />
-          <path d="m17 10 4-2v8l-4-2" />
+        <svg {...s}>
+          <rect x="2" y="5" width="16" height="14" rx="2" />
+          <path d="M18 10l4-2.5v10L18 15" />
         </svg>
       );
     case "check":
       return (
-        <svg {...common}>
+        <svg {...s}>
           <path d="m5 12 4 4 10-10" />
         </svg>
       );
     case "play":
       return (
-        <svg {...common}>
-          <path d="M8 6v12l9-6-9-6Z" />
+        <svg {...s}>
+          <path d="M7 4v16l13-8L7 4Z" />
         </svg>
       );
     case "blur":
       return (
-        <svg {...common}>
-          <path d="M4 11c0-4.2 3.4-7.5 7.5-7.5S19 6.8 19 11c0 3.1-1.8 5.8-4.5 6.9l-.8.3H9.3l-.8-.3C5.8 16.8 4 14.1 4 11Z" />
+        <svg {...s}>
+          <circle cx="12" cy="12" r="7" />
+          <path d="M12 5v14" />
+          <path d="M7 12h10" />
+          <path d="M8.5 8.5l7 7" />
+          <path d="M15.5 8.5l-7 7" />
         </svg>
       );
     case "upscale":
       return (
-        <svg {...common}>
-          <rect x="4" y="4" width="8" height="8" rx="1.5" />
-          <rect x="12" y="12" width="8" height="8" rx="1.5" />
-          <path d="M12 4h8v8" />
-          <path d="M4 12v8h8" />
+        <svg {...s}>
+          <rect x="4" y="4" width="7" height="7" rx="1.5" />
+          <rect x="13" y="13" width="7" height="7" rx="1.5" />
+          <path d="M11 4h9v9" />
+          <path d="M4 11v9h9" />
         </svg>
       );
     case "contrast":
       return (
-        <svg {...common}>
-          <circle cx="12" cy="12" r="8" />
-          <path d="M12 4c2.6 0 5 1.2 6.5 3.2A8 8 0 1 1 5.5 7.2 8 8 0 0 1 12 4Z" />
+        <svg {...s}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 3c-2 0-4 1.5-5.5 4S5 12 5 12s1 5.5 2.5 8S10 21 12 21V3Z" />
         </svg>
       );
     case "arrow":
       return (
-        <svg {...common}>
+        <svg {...s}>
           <path d="M5 12h14" />
           <path d="m13 6 6 6-6 6" />
         </svg>
       );
     case "wand":
       return (
-        <svg {...common}>
-          <path d="M14.5 3.5 20 9l-9 9-5.5-5.5 9-9Z" />
-          <path d="m14 5 5 5" />
-          <path d="M3 20c2 .5 4.5 0 6-2" />
-          <path d="M3 20c.5 2 0 4.5-2 6" />
-          <path d="M3 20c1.5.5 3 1 5 0" />
+        <svg {...s}>
+          <path d="M12 2l1.5 4.5L18 8l-4.5 1.5L12 14l-1.5-4.5L6 8l4.5-1.5L12 2Z" />
+          <path d="M18 16l.7 2.3L21 19l-2.3.7L18 22l-.7-2.3L15 19l2.3-.7L18 16Z" />
+          <path d="M6 16l.5 1.5L8 18l-1.5.5L6 20l-.5-1.5L4 18l1.5-.5L6 16Z" />
         </svg>
       );
     case "eraser":
       return (
-        <svg {...common}>
-          <path d="M20 20H7l-4-4 9-9 8 8-4 4Z" />
+        <svg {...s}>
+          <path d="M21 20H8l-5-5 9-9 9 9-4 4Z" />
           <path d="m6.5 13.5 5-5" />
+          <path d="M3 20h18" />
         </svg>
       );
     case "sun":
       return (
-        <svg {...common}>
-          <circle cx="12" cy="12" r="4" />
-          <path d="M12 2v2" />
-          <path d="M12 20v2" />
-          <path d="M4.93 4.93 6.34 6.34" />
-          <path d="M17.66 17.66 19.07 19.07" />
-          <path d="M2 12h2" />
-          <path d="M20 12h2" />
-          <path d="M6.34 17.66 4.93 19.07" />
-          <path d="M19.07 4.93 17.66 6.34" />
+        <svg {...s}>
+          <circle cx="12" cy="12" r="5" />
+          <path d="M12 1v3" />
+          <path d="M12 20v3" />
+          <path d="M4.22 4.22l2.12 2.12" />
+          <path d="M17.66 17.66l2.12 2.12" />
+          <path d="M1 12h3" />
+          <path d="M20 12h3" />
+          <path d="M6.34 17.66l-2.12 2.12" />
+          <path d="M19.78 4.22l-2.12 2.12" />
         </svg>
       );
     case "droplet":
       return (
-        <svg {...common}>
-          <path d="M12 2C9.5 7 6 10.5 6 14a6 6 0 0 0 12 0c0-3.5-3.5-7-6-12Z" />
+        <svg {...s}>
+          <path d="M12 2C9 7 5 10.5 5 14a7 7 0 0 0 14 0c0-3.5-4-7-7-12Z" />
+          <path d="M12 18a4 4 0 0 0 4-4" />
         </svg>
       );
     case "zap":
       return (
-        <svg {...common}>
+        <svg {...s}>
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
         </svg>
       );
     case "menu":
       return (
-        <svg {...common}>
+        <svg {...s}>
           <path d="M4 6h16" />
           <path d="M4 12h16" />
           <path d="M4 18h16" />
-        </svg>
-      );
-    case "logo":
-      return (
-        <svg {...common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-          <path d="M12 3c-2 4-6 7-6 11a6 6 0 0 0 12 0c0-4-4-7-6-11Z" />
-          <path d="M9 12h6" />
-          <path d="M12 9v6" />
         </svg>
       );
     default:

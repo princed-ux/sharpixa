@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { Icon } from "@/components/Icons";
 
 export default function Footer() {
@@ -9,18 +10,7 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
           <div className="md:col-span-2">
             <div className="flex items-center gap-2 font-bold text-lg mb-3">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="url(#sharpify-grad-foot)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <defs>
-                  <linearGradient id="sharpify-grad-foot" x1="0" y1="0" x2="24" y2="24">
-                    <stop offset="0%" stopColor="#6366f1" />
-                    <stop offset="50%" stopColor="#a855f7" />
-                    <stop offset="100%" stopColor="#ec4899" />
-                  </linearGradient>
-                </defs>
-                <path d="M12 3c-2 4-6 7-6 11a6 6 0 0 0 12 0c0-4-4-7-6-11Z" />
-                <path d="M9 12h6" />
-                <path d="M12 9v6" />
-              </svg>
+              <Image src="/sharpify-logo.png" alt="Sharpify" width={24} height={24} className="w-6 h-6" />
               <span className="gradient-text">Sharpify</span>
             </div>
             <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm">

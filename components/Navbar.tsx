@@ -1,13 +1,21 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import Image from "next/image";
 import { Icon } from "@/components/Icons";
 
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const handler = () => { if (mq.matches) setMobileOpen(false); };
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   const scrollTo = useCallback((id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
@@ -33,20 +41,9 @@ export default function Navbar() {
     <nav className="sticky top-0 z-50 glass border-b border-gray-200/50 dark:border-gray-800/50">
       <div className="container-x flex items-center justify-between h-16">
         {/* Brand */}
-        <a href="/remove-watermark" className="flex items-center gap-2 font-bold text-xl shrink-0">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="url(#sharpify-grad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <defs>
-              <linearGradient id="sharpify-grad" x1="0" y1="0" x2="24" y2="24">
-                <stop offset="0%" stopColor="#6366f1" />
-                <stop offset="50%" stopColor="#a855f7" />
-                <stop offset="100%" stopColor="#ec4899" />
-              </linearGradient>
-            </defs>
-            <path d="M12 3c-2 4-6 7-6 11a6 6 0 0 0 12 0c0-4-4-7-6-11Z" />
-            <path d="M9 12h6" />
-            <path d="M12 9v6" />
-          </svg>
-          <span className="gradient-text">Sharpify</span>
+        <a href="/remove-watermark" className="flex items-center gap-2 shrink-0">
+          <Image src="/sharpify-logo.png" alt="Sharpify" width={28} height={28} className="w-7 h-7" />
+          <span className="font-bold text-xl gradient-text">Sharpify</span>
         </a>
 
         {/* Desktop nav */}
@@ -55,11 +52,12 @@ export default function Navbar() {
             <button
               key={link.path}
               onClick={() => router.push(link.path)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all ${
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all relative ${
                 isActive(link.path)
                   ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 shadow-sm"
                   : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
               }`}
+              style={isActive(link.path) ? { boxShadow: "inset 0 -2px 0 #6366f1" } : undefined}
             >
               <Icon name={link.icon} size={14} />
               {link.label}
@@ -77,10 +75,20 @@ export default function Navbar() {
           ))}
         </div>
 
-        {/* Mobile toggle */}
-        <button className="lg:hidden p-2" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
-          <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path d="M4 6h16M4 12h16M4 18h16" />
+        {/* Mobile toggle — animated hamburger to X */}
+        <button className="lg:hidden p-2 relative w-9 h-9 flex items-center justify-center" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="overflow-visible">
+            {/* Hamburger */}
+            <g className="transition-all duration-300" style={{ opacity: mobileOpen ? 0 : 1 }}>
+              <path d="M4 6h16" />
+              <path d="M4 12h16" />
+              <path d="M4 18h16" />
+            </g>
+            {/* X */}
+            <g className="transition-all duration-300" style={{ opacity: mobileOpen ? 1 : 0 }}>
+              <path d="M6 6l12 12" />
+              <path d="M18 6l-12 12" />
+            </g>
           </svg>
         </button>
       </div>

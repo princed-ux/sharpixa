@@ -298,7 +298,7 @@ export const __inpaintDbg = { noCorr: false, noSeamBlur: false, noEdgeBlur: fals
 const MASK_DILATE = 5;
 const MASK_ALPHA_THRESHOLD = 16;
 const BOX_MARGIN = 48;
-const TEXTURE_STRENGTH = 0.85;
+const TEXTURE_STRENGTH = 0.95;
 const TEXTURE_CLAMP = 36;
 // Below this many masked pixels the diffusion fill is already invisible and
 // the patch search isn't worth its cost.
@@ -576,9 +576,7 @@ async function buildInpaintPlan(
       }
       if (nearOpposite) {
         blurList.push(i);
-        // Kept light so the ring around the brushed area doesn't read as a
-        // soft halo on crisp footage.
-        blendList.push(inside ? 0.4 : 0.18);
+        blendList.push(inside ? 0.2 : 0.1);
         if (!inside) rimList.push(i);
       }
     }
@@ -1669,6 +1667,28 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
     px[di + 2] = px[di + 2] * (1 - blend) + (b / n) * blend;
   }
 
+  // Light sharpen pass on inpainted pixels to counteract blur. A 3×3
+  // unsharp-mask lifts edges that the diffusion and seam blur softened.
+  scratch.set(px);
+  for (let j = 0; j < t; j++) {
+    const idx = targets[j];
+    const x = idx % bw;
+    const y = (idx - x) / bw;
+    if (x < 1 || x >= bw - 1 || y < 1 || y >= bh - 1) continue;
+    for (let c = 0; c < 3; c++) {
+      const center = scratch[idx * 4 + c];
+      const sum =
+        scratch[((y - 1) * bw + x) * 4 + c] +
+        scratch[((y + 1) * bw + x) * 4 + c] +
+        scratch[(y * bw + x - 1) * 4 + c] +
+        scratch[(y * bw + x + 1) * 4 + c];
+      const blurred = sum * 0.25;
+      // 0.35 strength — subtle but enough to restore edge contrast
+      const sharpened = center + 0.35 * (center - blurred);
+      px[idx * 4 + c] = sharpened < 0 ? 0 : sharpened > 255 ? 255 : sharpened;
+    }
+  }
+
   ctx.putImageData(imageData, bx, by);
 }
 
@@ -1785,97 +1805,164 @@ export async function autoRemoveBackgroundFromImage(
   const imageData = ctx.getImageData(0, 0, w, h);
   const px = imageData.data;
 
-  // Sample edge pixels to estimate the background color.
-  const stepX = Math.max(1, Math.floor(w / 80));
-  const stepY = Math.max(1, Math.floor(h / 80));
-  let rSum = 0, gSum = 0, bSum = 0, n = 0;
+  // ── Step 1: Sample a thick border strip ──
+  // Using a thicker border (up to 5% of min dimension) avoids sampling the
+  // subject when it extends to the image edge. We also skip the center 60%
+  // region when building the background model so the subject's own colors
+  // don't contaminate it.
+  const borderW = Math.max(2, Math.floor(Math.min(w, h) * 0.04));
+  const step = Math.max(1, Math.floor(Math.min(w, h) / 120));
+  const centerCx = w >> 1, centerCy = h >> 1;
+  const centerR = Math.min(w, h) * 0.25;
 
-  for (let x = 0; x < w; x += stepX) {
-    for (const y of [0, h - 1]) {
-      const i = (y * w + x) * 4;
-      rSum += px[i]; gSum += px[i + 1]; bSum += px[i + 2]; n++;
+  const samples: number[][] = [];
+
+  const addSample = (x: number, y: number) => {
+    // Skip points inside the central region (likely subject).
+    const dx = x - centerCx, dy = y - centerCy;
+    if (dx * dx + dy * dy < centerR * centerR) return;
+    const i = (y * w + x) * 4;
+    samples.push([px[i], px[i + 1], px[i + 2]]);
+  };
+
+  // Top and bottom strips
+  for (let x = 0; x < w; x += step) {
+    for (let by = 0; by < borderW; by++) {
+      addSample(x, by);
+      addSample(x, h - 1 - by);
     }
   }
-  for (let y = 1; y < h - 1; y += stepY) {
-    for (const x of [0, w - 1]) {
-      const i = (y * w + x) * 4;
-      rSum += px[i]; gSum += px[i + 1]; bSum += px[i + 2]; n++;
+  // Left and right strips (avoid re-sampling corners)
+  for (let y = borderW; y < h - borderW; y += step) {
+    for (let bx = 0; bx < borderW; bx++) {
+      addSample(bx, y);
+      addSample(w - 1 - bx, y);
     }
   }
 
-  const bgR = rSum / n;
-  const bgG = gSum / n;
-  const bgB = bSum / n;
+  if (samples.length < 10) {
+    // Fallback: sample everywhere
+    for (let y = 0; y < h; y += step * 2) {
+      for (let x = 0; x < w; x += step * 2) {
+        const i = (y * w + x) * 4;
+        samples.push([px[i], px[i + 1], px[i + 2]]);
+      }
+    }
+  }
 
-  // Compute the average edge-pixel distance from the mean to derive a
-  // per-channel tolerance. A tight tolerance keeps fine edge detail sharp.
-  let devR = 0, devG = 0, devB = 0;
-  n = 0;
-  for (let x = 0; x < w; x += stepX) {
-    for (const y of [0, h - 1]) {
-      const i = (y * w + x) * 4;
-      devR += Math.abs(px[i] - bgR);
-      devG += Math.abs(px[i + 1] - bgG);
-      devB += Math.abs(px[i + 2] - bgB);
+  // ── Step 2: Find up to 3 dominant background color clusters ──
+  // Quantise colours to 4-bit per channel (16³ = 4096 bins) and pick the
+  // most frequent bins that are sufficiently far apart in colour space.
+  const quant = (v: number) => Math.floor(v / 18);
+  const hist = new Map<number, { count: number; r: number; g: number; b: number }>();
+  for (const [r, g, b] of samples) {
+    const key = (quant(r) << 10) | (quant(g) << 5) | quant(b);
+    const entry = hist.get(key) || { count: 0, r: 0, g: 0, b: 0 };
+    entry.count++;
+    entry.r += r; entry.g += g; entry.b += b;
+    hist.set(key, entry);
+  }
+
+  const avgClusters = [...hist.entries()]
+    .map(([_, v]) => ({
+      r: v.r / v.count, g: v.g / v.count, b: v.b / v.count,
+      weight: v.count,
+    }))
+    .sort((a, b) => b.weight - a.weight);
+
+  // Greedily pick top clusters that are at least 40 apart in colour space.
+  const clusters: typeof avgClusters = [];
+  for (const c of avgClusters) {
+    let tooClose = false;
+    for (const existing of clusters) {
+      const d = Math.sqrt(
+        (c.r - existing.r) ** 2 +
+        (c.g - existing.g) ** 2 +
+        (c.b - existing.b) ** 2,
+      );
+      if (d < 40) { tooClose = true; break; }
+    }
+    if (!tooClose) clusters.push(c);
+    if (clusters.length >= 3) break;
+  }
+
+  if (clusters.length === 0) clusters.push(avgClusters[0] || { r: 255, g: 255, b: 255, weight: 1 });
+
+  // ── Step 3: Per-cluster tolerance ──
+  const bgModels = clusters.map((bg) => {
+    let devR = 0, devG = 0, devB = 0, n = 0;
+    for (const [r, g, b] of samples) {
+      devR += Math.abs(r - bg.r);
+      devG += Math.abs(g - bg.g);
+      devB += Math.abs(b - bg.b);
       n++;
     }
-  }
-  for (let y = 1; y < h - 1; y += stepY) {
-    for (const x of [0, w - 1]) {
-      const i = (y * w + x) * 4;
-      devR += Math.abs(px[i] - bgR);
-      devG += Math.abs(px[i + 1] - bgG);
-      devB += Math.abs(px[i + 2] - bgB);
-      n++;
-    }
-  }
+    return {
+      r: bg.r, g: bg.g, b: bg.b,
+      tolR: Math.max(28, Math.min(75, (devR / n) * 1.8)),
+      tolG: Math.max(28, Math.min(75, (devG / n) * 1.8)),
+      tolB: Math.max(28, Math.min(75, (devB / n) * 1.8)),
+    };
+  });
 
-  const tolR = Math.max(35, Math.min(90, devR / n * 2.5));
-  const tolG = Math.max(35, Math.min(90, devG / n * 2.5));
-  const tolB = Math.max(35, Math.min(90, devB / n * 2.5));
-
-  // Build a soft alpha mask: pixels close to the background color become
-  // transparent; pixels far away stay opaque. The transition zone between
-  // the two is feathered so edges don't look jagged.
+  // ── Step 4: Build soft alpha mask ──
+  // For each pixel, find the closest-matching background cluster. If the
+  // normalised distance is below 1.0 the pixel is progressively made
+  // transparent; above 1.4 it stays fully opaque. The 0.4-wide ramp gives
+  // a natural feather.
   const mask = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) {
     const idx = i * 4;
-    const dr = Math.abs(px[idx] - bgR) / tolR;
-    const dg = Math.abs(px[idx + 1] - bgG) / tolG;
-    const db = Math.abs(px[idx + 2] - bgB) / tolB;
-    const d = Math.max(dr, dg, db);
-    // d <= 0.7 → fully transparent; d >= 1.3 → fully opaque
-    if (d < 1.3) {
-      mask[i] = d <= 0.7 ? 0 : Math.round(((d - 0.7) / 0.6) * 255);
+    const r = px[idx], g = px[idx + 1], b = px[idx + 2];
+
+    let bestD = Infinity;
+    for (const m of bgModels) {
+      const dr = Math.abs(r - m.r) / m.tolR;
+      const dg = Math.abs(g - m.g) / m.tolG;
+      const db = Math.abs(b - m.b) / m.tolB;
+      const d = Math.max(dr, dg, db);
+      if (d < bestD) bestD = d;
+    }
+
+    if (bestD < 1.4) {
+      mask[i] = bestD <= 1.0 ? 0 : Math.round(((bestD - 1.0) / 0.4) * 255);
     } else {
       mask[i] = 255;
     }
   }
 
-  // Feather the mask along the edges of the subject so partially-covered
-  // background pixels at the silhouette transition smoothly.
+  // ── Step 5: Feather the transition band ──
+  // A wider neighbourhood (3×3 → 8 neighbours) on intermediate values
+  // gives smoother edges without washing out solid areas.
   const featherPass = (passes: number): void => {
     const tmp = new Uint8Array(w * h);
     for (let p = 0; p < passes; p++) {
       tmp.set(mask);
-      for (let y = 1; y < h - 1; y++) {
-        for (let x = 1; x < w - 1; x++) {
+      for (let y = 2; y < h - 2; y++) {
+        for (let x = 2; x < w - 2; x++) {
           const i = y * w + x;
-          if (mask[i] === 0 || mask[i] === 255) continue;
-          const sum =
-            tmp[i - 1] + tmp[i + 1] + tmp[i - w] + tmp[i + w];
-          mask[i] = (sum + 2) >> 2;
+          const v = mask[i];
+          if (v === 0 || v === 255) continue;
+          let sum = 0, count = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              sum += tmp[i + dy * w + dx];
+              count++;
+            }
+          }
+          mask[i] = (sum + (count >> 1)) / count;
         }
       }
     }
   };
-  featherPass(2);
+  featherPass(3);
 
-  // Apply the mask to the image's alpha channel.
+  // ── Step 6: Apply mask → alpha channel ──
   for (let i = 0; i < w * h; i++) {
     const a = mask[i];
     if (a < 255) {
-      px[i * 4 + 3] = (px[i * 4 + 3] * a) / 255;
+      px[i * 4 + 3] = (px[i * 4 + 3] * a) >> 8;
     }
   }
 

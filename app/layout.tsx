@@ -111,10 +111,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <link
-          rel="icon"
-          href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' y1='0' x2='100' y2='100'><stop offset='0%' stopColor='%236366f1'/><stop offset='50%' stopColor='%23a855f7'/><stop offset='100%' stopColor='%23ec4899'/></linearGradient></defs><circle cx='50' cy='50' r='40' fill='url(%23g)'/><path d='M35 50h30M50 35v30' stroke='white' strokeWidth='6' strokeLinecap='round'/></svg>"
-        />
+        <link rel="icon" href="/sharpify-logo.png" />
+        <link rel="apple-touch-icon" href="/sharpify-logo.png" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdWebApp) }}

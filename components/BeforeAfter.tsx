@@ -18,18 +18,50 @@ function ComparisonSlider({ beforeImg, afterImg, label }: { beforeImg: string; a
   const innerRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
+  const autoAnimRef = useRef<number>(0);
+  const autoActiveRef = useRef(true);
+  const progressRef = useRef(0);
+  const dirRef = useRef(1);
 
-  const updateSlider = useCallback((clientX: number) => {
-    const container = containerRef.current;
+  const setSlider = useCallback((pct: number) => {
     const reveal = revealRef.current;
     const handle = handleRef.current;
-    if (!container || !reveal || !handle) return;
-    const rect = container.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    if (!reveal || !handle) return;
     reveal.style.width = `${pct}%`;
     handle.style.left = `${pct}%`;
   }, []);
+
+  const updateSlider = useCallback((clientX: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    setSlider(pct);
+  }, [setSlider]);
+
+  // Auto-play animation: sweeps left→right→left repeatedly.
+  useEffect(() => {
+    const duration = 3000;
+    let start = performance.now();
+    let paused = false;
+
+    const tick = (now: number) => {
+      if (paused) return;
+      const elapsed = now - start;
+      progressRef.current = (elapsed % duration) / duration;
+      // Ease in-out for a smoother feel
+      const t = progressRef.current;
+      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      if (!draggingRef.current && autoActiveRef.current) {
+        setSlider(eased * 100);
+      }
+      autoAnimRef.current = requestAnimationFrame(tick);
+    };
+    autoAnimRef.current = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(autoAnimRef.current);
+  }, [setSlider]);
 
   // The reveal pane is clipped by width, so the image inside sits in a
   // wrapper pinned to the container's pixel width — otherwise the photo
@@ -47,11 +79,13 @@ function ComparisonSlider({ beforeImg, afterImg, label }: { beforeImg: string; a
   }, []);
 
   const onMouseDown = (e: React.MouseEvent) => {
+    autoActiveRef.current = false;
     draggingRef.current = true;
     updateSlider(e.clientX);
   };
 
   const onTouchStart = (e: React.TouchEvent) => {
+    autoActiveRef.current = false;
     draggingRef.current = true;
     updateSlider(e.touches[0].clientX);
   };
