@@ -10,8 +10,8 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
           <div className="md:col-span-2">
             <div className="flex items-center gap-2 font-bold text-lg mb-3">
-              <Image src="/sharpify-logo.png" alt="Sharpify" width={24} height={24} className="w-6 h-6" />
-              <span className="gradient-text">Sharpify</span>
+              <Image src="/sharpixa-logo.png" alt="Sharpixa" width={24} height={24} className="w-6 h-6" />
+              <span className="gradient-text">Sharpixa</span>
             </div>
             <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm">
               Free online watermark removal, background removal, and image/video enhancement. No signup required. Everything runs in your browser.
@@ -36,7 +36,7 @@ export default function Footer() {
         </div>
         <div className="ad-slot mb-6">Advertisement — Google AdSense (Footer 728×90)</div>
         <div className="border-t border-gray-200 dark:border-gray-800 pt-6 text-center text-sm text-gray-400">
-          <p>&copy; 2026 Sharpify. All rights reserved.</p>
+          <p>&copy; 2026 Sharpixa. All rights reserved.</p>
           <p className="mt-1 text-xs">Processing happens entirely in your browser. Nothing is uploaded to any server.</p>
         </div>
       </div>

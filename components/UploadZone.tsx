@@ -256,7 +256,7 @@ export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
           ? "jpg"
           : "png";
     a.href = url;
-    a.download = `${baseName}_sharpified.${ext}`;
+    a.download = `${baseName}_sharpixa.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

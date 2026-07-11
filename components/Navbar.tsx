@@ -42,8 +42,8 @@ export default function Navbar() {
       <div className="container-x flex items-center justify-between h-16">
         {/* Brand */}
         <a href="/remove-watermark" className="flex items-center gap-2 shrink-0">
-          <Image src="/sharpify-logo.png" alt="Sharpify" width={28} height={28} className="w-7 h-7" />
-          <span className="font-bold text-xl gradient-text">Sharpify</span>
+          <Image src="/sharpixa-logo.png" alt="Sharpixa" width={28} height={28} className="w-7 h-7" />
+          <span className="font-bold text-xl gradient-text">Sharpixa</span>
         </a>
 
         {/* Desktop nav */}

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Sharpify — Remove Watermarks, Backgrounds & Enhance Images & Videos Free Online",
+  title: "Sharpixa — Remove Watermarks, Backgrounds & Enhance Images & Videos Free Online",
   description:
     "Remove watermarks, logos, text, and objects from images and videos online free. Remove image backgrounds and enhance quality to 4K/8K. No signup required. 100% free.",
   keywords: [
@@ -20,21 +20,21 @@ export const metadata: Metadata = {
     "blur removal",
     "logo remover",
     "text remover from image",
-    "Sharpify",
+    "Sharpixa",
   ],
-  authors: [{ name: "Sharpify" }],
-  alternates: { canonical: "https://sharpify.app/" },
+  authors: [{ name: "Sharpixa" }],
+  alternates: { canonical: "https://sharpixa.com/" },
   openGraph: {
     type: "website",
-    url: "https://sharpify.app/",
-    title: "Sharpify — Remove Watermarks, Backgrounds & Enhance Images & Videos Free Online",
+    url: "https://sharpixa.com/",
+    title: "Sharpixa — Remove Watermarks, Backgrounds & Enhance Images & Videos Free Online",
     description:
       "Remove watermarks, logos, text, and objects from images and videos online free. AI-powered background removal and enhancement with no signup required.",
-    siteName: "Sharpify",
+    siteName: "Sharpixa",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Sharpify — Remove Watermarks, Backgrounds & Enhance Images & Videos",
+    title: "Sharpixa — Remove Watermarks, Backgrounds & Enhance Images & Videos",
     description:
       "Remove watermarks, logos, text, and objects from images and videos online free. No signup required.",
   },
@@ -47,8 +47,8 @@ export default function RootLayout({
   const jsonLdWebApp = {
     "@context": "https://schema.org",
     "@type": "WebApplication",
-    name: "Sharpify",
-    url: "https://sharpify.app",
+    name: "Sharpixa",
+    url: "https://sharpixa.com",
     description:
       "Free online watermark removal, background removal, and image/video enhancement tool. Remove logos, text, and objects with AI-powered technology.",
     applicationCategory: "MultimediaApplication",
@@ -67,10 +67,10 @@ export default function RootLayout({
     mainEntity: [
       {
         "@type": "Question",
-        name: "Is Sharpify free?",
+        name: "Is Sharpixa free?",
         acceptedAnswer: {
           "@type": "Answer",
-          text: "Yes! Sharpify is completely free to use. No signup or account needed. Just upload your file and remove watermarks, backgrounds, or enhance quality instantly.",
+          text: "Yes! Sharpixa is completely free to use. No signup or account needed. Just upload your file and remove watermarks, backgrounds, or enhance quality instantly.",
         },
       },
       {
@@ -111,8 +111,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <link rel="icon" href="/sharpify-logo.png" />
-        <link rel="apple-touch-icon" href="/sharpify-logo.png" />
+        <link rel="icon" href="/sharpixa-logo.png" />
+        <link rel="apple-touch-icon" href="/sharpixa-logo.png" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdWebApp) }}

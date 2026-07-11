@@ -2431,7 +2431,7 @@ export function generateSampleImage(): Promise<File> {
 // Exposed for automated end-to-end testing and for generating the marketing
 // before/after assets with the real production algorithms.
 if (typeof window !== "undefined") {
-  (window as unknown as Record<string, unknown>).__sharpify = {
+  (window as unknown as Record<string, unknown>).__sharpixa = {
     __inpaintDbg,
     buildInpaintPlan,
     applyInpaintPlan,
