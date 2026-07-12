@@ -6,157 +6,157 @@ import { Icon } from "@/components/Icons";
 // Each pair is a real photo: the "before" file has the watermark baked into
 // its pixels, the "after" file is the actual output of the removal engine.
 const examples: { label: string; beforeImg: string; afterImg: string }[] = [
-  { label: "Watermark Removal", beforeImg: "/demo/before-nature.jpg", afterImg: "/demo/after-nature.jpg" },
-  { label: "Text Overlay Removal", beforeImg: "/demo/before-city.jpg", afterImg: "/demo/after-city.jpg" },
-  { label: "Logo Removal", beforeImg: "/demo/before-portrait.jpg", afterImg: "/demo/after-portrait.jpg" },
-  { label: "Timestamp Cleanup", beforeImg: "/demo/before-coffee.jpg", afterImg: "/demo/after-coffee.jpg" },
+ { label: "Watermark Removal", beforeImg: "/demo/before-nature.jpg", afterImg: "/demo/after-nature.jpg" },
+ { label: "Text Overlay Removal", beforeImg: "/demo/before-city.jpg", afterImg: "/demo/after-city.jpg" },
+ { label: "Logo Removal", beforeImg: "/demo/before-portrait.jpg", afterImg: "/demo/after-portrait.jpg" },
+ { label: "Timestamp Cleanup", beforeImg: "/demo/before-coffee.jpg", afterImg: "/demo/after-coffee.jpg" },
 ];
 
 function ComparisonSlider({ beforeImg, afterImg, label }: { beforeImg: string; afterImg: string; label: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const revealRef = useRef<HTMLDivElement>(null);
-  const innerRef = useRef<HTMLDivElement>(null);
-  const handleRef = useRef<HTMLDivElement>(null);
-  const draggingRef = useRef(false);
-  const autoAnimRef = useRef<number>(0);
-  const autoActiveRef = useRef(true);
-  const progressRef = useRef(0);
-  const dirRef = useRef(1);
+ const containerRef = useRef<HTMLDivElement>(null);
+ const revealRef = useRef<HTMLDivElement>(null);
+ const innerRef = useRef<HTMLDivElement>(null);
+ const handleRef = useRef<HTMLDivElement>(null);
+ const draggingRef = useRef(false);
+ const autoAnimRef = useRef<number>(0);
+ const autoActiveRef = useRef(true);
+ const progressRef = useRef(0);
+ const dirRef = useRef(1);
 
-  const setSlider = useCallback((pct: number) => {
-    const reveal = revealRef.current;
-    const handle = handleRef.current;
-    if (!reveal || !handle) return;
-    reveal.style.width = `${pct}%`;
-    handle.style.left = `${pct}%`;
-  }, []);
+ const setSlider = useCallback((pct: number) => {
+ const reveal = revealRef.current;
+ const handle = handleRef.current;
+ if (!reveal || !handle) return;
+ reveal.style.width = `${pct}%`;
+ handle.style.left = `${pct}%`;
+ }, []);
 
-  const updateSlider = useCallback((clientX: number) => {
-    const container = containerRef.current;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
-    setSlider(pct);
-  }, [setSlider]);
+ const updateSlider = useCallback((clientX: number) => {
+ const container = containerRef.current;
+ if (!container) return;
+ const rect = container.getBoundingClientRect();
+ const x = clientX - rect.left;
+ const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
+ setSlider(pct);
+ }, [setSlider]);
 
-  // Auto-play animation: sweeps left→right→left repeatedly.
-  useEffect(() => {
-    const duration = 3000;
-    let start = performance.now();
-    let paused = false;
+ // Auto-play animation: sweeps left→right→left repeatedly.
+ useEffect(() => {
+ const duration = 3000;
+ let start = performance.now();
+ let paused = false;
 
-    const tick = (now: number) => {
-      if (paused) return;
-      const elapsed = now - start;
-      progressRef.current = (elapsed % duration) / duration;
-      // Ease in-out for a smoother feel
-      const t = progressRef.current;
-      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-      if (!draggingRef.current && autoActiveRef.current) {
-        setSlider(eased * 100);
-      }
-      autoAnimRef.current = requestAnimationFrame(tick);
-    };
-    autoAnimRef.current = requestAnimationFrame(tick);
+ const tick = (now: number) => {
+ if (paused) return;
+ const elapsed = now - start;
+ progressRef.current = (elapsed % duration) / duration;
+ // Ease in-out for a smoother feel
+ const t = progressRef.current;
+ const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+ if (!draggingRef.current && autoActiveRef.current) {
+ setSlider(eased * 100);
+ }
+ autoAnimRef.current = requestAnimationFrame(tick);
+ };
+ autoAnimRef.current = requestAnimationFrame(tick);
 
-    return () => cancelAnimationFrame(autoAnimRef.current);
-  }, [setSlider]);
+ return () => cancelAnimationFrame(autoAnimRef.current);
+ }, [setSlider]);
 
-  // The reveal pane is clipped by width, so the image inside sits in a
-  // wrapper pinned to the container's pixel width — otherwise the photo
-  // would rescale as the slider moves instead of being uncovered.
-  useEffect(() => {
-    const container = containerRef.current;
-    const inner = innerRef.current;
-    if (!container || !inner) return;
-    const sync = () => {
-      inner.style.width = `${container.clientWidth}px`;
-    };
-    sync();
-    window.addEventListener("resize", sync);
-    return () => window.removeEventListener("resize", sync);
-  }, []);
+ // The reveal pane is clipped by width, so the image inside sits in a
+ // wrapper pinned to the container's pixel width — otherwise the photo
+ // would rescale as the slider moves instead of being uncovered.
+ useEffect(() => {
+ const container = containerRef.current;
+ const inner = innerRef.current;
+ if (!container || !inner) return;
+ const sync = () => {
+ inner.style.width = `${container.clientWidth}px`;
+ };
+ sync();
+ window.addEventListener("resize", sync);
+ return () => window.removeEventListener("resize", sync);
+ }, []);
 
-  const onMouseDown = (e: React.MouseEvent) => {
-    autoActiveRef.current = false;
-    draggingRef.current = true;
-    updateSlider(e.clientX);
-  };
+ const onMouseDown = (e: React.MouseEvent) => {
+ autoActiveRef.current = false;
+ draggingRef.current = true;
+ updateSlider(e.clientX);
+ };
 
-  const onTouchStart = (e: React.TouchEvent) => {
-    autoActiveRef.current = false;
-    draggingRef.current = true;
-    updateSlider(e.touches[0].clientX);
-  };
+ const onTouchStart = (e: React.TouchEvent) => {
+ autoActiveRef.current = false;
+ draggingRef.current = true;
+ updateSlider(e.touches[0].clientX);
+ };
 
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => { if (draggingRef.current) updateSlider(e.clientX); };
-    const onTouchMove = (e: TouchEvent) => { if (draggingRef.current) updateSlider(e.touches[0].clientX); };
-    const onEnd = () => { draggingRef.current = false; };
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("touchmove", onTouchMove);
-    document.addEventListener("mouseup", onEnd);
-    document.addEventListener("touchend", onEnd);
-    return () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("touchmove", onTouchMove);
-      document.removeEventListener("mouseup", onEnd);
-      document.removeEventListener("touchend", onEnd);
-    };
-  }, [updateSlider]);
+ useEffect(() => {
+ const onMouseMove = (e: MouseEvent) => { if (draggingRef.current) updateSlider(e.clientX); };
+ const onTouchMove = (e: TouchEvent) => { if (draggingRef.current) updateSlider(e.touches[0].clientX); };
+ const onEnd = () => { draggingRef.current = false; };
+ document.addEventListener("mousemove", onMouseMove);
+ document.addEventListener("touchmove", onTouchMove);
+ document.addEventListener("mouseup", onEnd);
+ document.addEventListener("touchend", onEnd);
+ return () => {
+ document.removeEventListener("mousemove", onMouseMove);
+ document.removeEventListener("touchmove", onTouchMove);
+ document.removeEventListener("mouseup", onEnd);
+ document.removeEventListener("touchend", onEnd);
+ };
+ }, [updateSlider]);
 
-  return (
-    <div>
-      <div
-        ref={containerRef}
-        className="ba-container"
-        onMouseDown={onMouseDown}
-        onTouchStart={onTouchStart}
-      >
-        {/* Base layer: the clean result produced by the removal engine */}
-        <div className="ba-before">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={afterImg} alt={`After ${label} — cleaned photo`} />
-        </div>
-        {/* Left reveal pane: the original with the watermark baked in */}
-        <div ref={revealRef} className="ba-after">
-          <div ref={innerRef} style={{ position: "relative", height: "100%" }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={beforeImg}
-              alt={`Before ${label} — photo with watermark`}
-              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-            />
-          </div>
-        </div>
-        <div ref={handleRef} className="ba-handle">
-          <div className="ba-handle-btn">
-            <Icon name="arrow" size={16} />
-          </div>
-        </div>
-        <span className="ba-label ba-label-before">Before</span>
-        <span className="ba-label ba-label-after">After</span>
-      </div>
-      <p className="text-center text-sm font-semibold mt-3">{label}</p>
-    </div>
-  );
+ return (
+ <div>
+ <div
+ ref={containerRef}
+ className="ba-container"
+ onMouseDown={onMouseDown}
+ onTouchStart={onTouchStart}
+ >
+ {/* Base layer: the clean result produced by the removal engine */}
+ <div className="ba-before">
+ {/* eslint-disable-next-line @next/next/no-img-element */}
+ <img src={afterImg} alt={`After ${label} — cleaned photo`} />
+ </div>
+ {/* Left reveal pane: the original with the watermark baked in */}
+ <div ref={revealRef} className="ba-after">
+ <div ref={innerRef} style={{ position: "relative", height: "100%" }}>
+ {/* eslint-disable-next-line @next/next/no-img-element */}
+ <img
+ src={beforeImg}
+ alt={`Before ${label} — photo with watermark`}
+ style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+ />
+ </div>
+ </div>
+ <div ref={handleRef} className="ba-handle">
+ <div className="ba-handle-btn">
+ <Icon name="arrow" size={16} />
+ </div>
+ </div>
+ <span className="ba-label ba-label-before">Before</span>
+ <span className="ba-label ba-label-after">After</span>
+ </div>
+ <p className="text-center text-sm font-semibold mt-3">{label}</p>
+ </div>
+ );
 }
 
 export default function BeforeAfter() {
-  return (
-    <section className="section bg-gray-50 dark:bg-gray-900/50" id="before-after">
-      <div className="container-x">
-        <h2 className="text-2xl md:text-3xl font-bold text-center mb-2">Before &amp; After Comparison</h2>
-        <p className="text-center text-gray-500 dark:text-gray-400 mb-10">
-          Drag the slider — every result below was produced by this tool&apos;s own removal engine
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-          {examples.map((ex) => (
-            <ComparisonSlider key={ex.label} beforeImg={ex.beforeImg} afterImg={ex.afterImg} label={ex.label} />
-          ))}
-        </div>
-      </div>
-    </section>
-  );
+ return (
+ <section className="section bg-gray-50" id="before-after">
+ <div className="container-x">
+ <h2 className="text-2xl md:text-3xl font-bold text-center mb-2">Before &amp; After Comparison</h2>
+ <p className="text-center text-gray-500 mb-10">
+ Drag the slider — every result below was produced by this tool&apos;s own removal engine
+ </p>
+ <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+ {examples.map((ex) => (
+ <ComparisonSlider key={ex.label} beforeImg={ex.beforeImg} afterImg={ex.afterImg} label={ex.label} />
+ ))}
+ </div>
+ </div>
+ </section>
+ );
 }

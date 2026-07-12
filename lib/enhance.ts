@@ -44,7 +44,8 @@ function sharpenKernel(
     for (let x = 1; x < w - 1; x++) {
       const idx = (y * w + x) * 4;
       // Edge measure on luma
-      const lum = (i: number) => data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      const lum = (i: number) =>
+        data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
       const gx = Math.abs(lum(idx + 4) - lum(idx - 4));
       const gy = Math.abs(lum(idx + w * 4) - lum(idx - w * 4));
       const grad = gx > gy ? gx : gy;
@@ -128,8 +129,12 @@ function applyPixelOps(
   const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
   for (let i = 0; i < data.length; i += 4) {
     data[i] = clamp(contrastFactor * (data[i] * brightnessFactor - 128) + 128);
-    data[i + 1] = clamp(contrastFactor * (data[i + 1] * brightnessFactor - 128) + 128);
-    data[i + 2] = clamp(contrastFactor * (data[i + 2] * brightnessFactor - 128) + 128);
+    data[i + 1] = clamp(
+      contrastFactor * (data[i + 1] * brightnessFactor - 128) + 128,
+    );
+    data[i + 2] = clamp(
+      contrastFactor * (data[i + 2] * brightnessFactor - 128) + 128,
+    );
   }
 
   const satFactor = 1 + saturation / 100;
@@ -151,7 +156,12 @@ export async function enhanceImage(
   maskDataUrl?: string | null,
 ): Promise<HTMLCanvasElement> {
   const p = (PRESETS as Record<string, Preset>)[presetName] || PRESETS.standard;
-  const controls = ctrl || { brightness: 0, contrast: 0, saturation: 0, sharpness: 0 };
+  const controls = ctrl || {
+    brightness: 0,
+    contrast: 0,
+    saturation: 0,
+    sharpness: 0,
+  };
 
   const brightness = p.brightness + controls.brightness;
   const contrast = p.contrast + controls.contrast;
@@ -161,11 +171,11 @@ export async function enhanceImage(
 
   let w = img.naturalWidth || img.width;
   let h = img.naturalHeight || img.height;
-  const scaleFactor = scale === "2x" ? 2 : scale === "4x" ? 4 : 1;
+  const scaleFactor = scale === "2x" ? 2 : scale === "4x" ? 4 : scale === "8k" ? 8 : 1;
   w = Math.round(w * scaleFactor);
   h = Math.round(h * scaleFactor);
 
-  const MAX_DIM = 4096;
+  const MAX_DIM = 7680;
   if (w > MAX_DIM || h > MAX_DIM) {
     const ratio = Math.min(MAX_DIM / w, MAX_DIM / h);
     w = Math.round(w * ratio);
@@ -293,7 +303,11 @@ interface InpaintPlan {
 }
 
 // TEMP debug switches for in-browser stage isolation; removed after tuning.
-export const __inpaintDbg = { noCorr: false, noSeamBlur: false, noEdgeBlur: false };
+export const __inpaintDbg = {
+  noCorr: false,
+  noSeamBlur: false,
+  noEdgeBlur: false,
+};
 
 const MASK_DILATE = 5;
 const MASK_ALPHA_THRESHOLD = 16;
@@ -356,7 +370,11 @@ async function buildInpaintPlan(
   const maskPixels = maskCtx.getImageData(0, 0, w, h).data;
 
   const maskedFull = new Uint8Array(w * h);
-  let minX = w, minY = h, maxX = -1, maxY = -1, count = 0;
+  let minX = w,
+    minY = h,
+    maxX = -1,
+    maxY = -1,
+    count = 0;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
@@ -647,7 +665,8 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
   const P = (2 * R + 1) * (2 * R + 1);
   // Enough levels that the hole shrinks to ~5px at the top of the pyramid.
   const levelCount =
-    Math.max(0, Math.min(4, Math.ceil(Math.log2(Math.max(1, maxDepth) / 5)))) + 1;
+    Math.max(0, Math.min(4, Math.ceil(Math.log2(Math.max(1, maxDepth) / 5)))) +
+    1;
 
   // Image/mask pyramid, level 0 = full resolution. A coarse pixel counts as
   // masked if any of its children is, so sources never contain fill.
@@ -666,7 +685,11 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
     const pm = lmask[l - 1];
     for (let y = 0; y < h2; y++) {
       for (let x = 0; x < w2; x++) {
-        let r = 0, g = 0, b = 0, n = 0, masked = 0;
+        let r = 0,
+          g = 0,
+          b = 0,
+          n = 0,
+          masked = 0;
         for (let dy = 0; dy < 2; dy++) {
           const sy = y * 2 + dy;
           if (sy >= ph) continue;
@@ -753,8 +776,17 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
     }
     const clear = (cx: number, cy: number): boolean => {
       if (cx < R || cy < R || cx > w - 1 - R || cy > h - 1 - R) return false;
-      const x0 = cx - R, y0 = cy - R, x1 = cx + R + 1, y1 = cy + R + 1;
-      return sat[y1 * satW + x1] - sat[y0 * satW + x1] - sat[y1 * satW + x0] + sat[y0 * satW + x0] === 0;
+      const x0 = cx - R,
+        y0 = cy - R,
+        x1 = cx + R + 1,
+        y1 = cy + R + 1;
+      return (
+        sat[y1 * satW + x1] -
+          sat[y0 * satW + x1] -
+          sat[y1 * satW + x0] +
+          sat[y0 * satW + x0] ===
+        0
+      );
     };
 
     let validCount = 0;
@@ -794,9 +826,12 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
     const FILL_W = 0.35;
     const GRAD_W = 2;
     const patchDist = (ti: number, si: number, cutoff: number): number => {
-      const tx = ti % w, ty = (ti - tx) / w;
-      const sx = si % w, sy = (si - sx) / w;
-      let sum = 0, wsum = 0;
+      const tx = ti % w,
+        ty = (ti - tx) / w;
+      const sx = si % w,
+        sy = (si - sx) / w;
+      let sum = 0,
+        wsum = 0;
       for (let dy = -R; dy <= R; dy++) {
         const tyy = ty + dy;
         if (tyy < 0 || tyy >= h) continue;
@@ -815,7 +850,9 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
           const db = est[a + 2] - est[b + 2];
           const dgx = gx[tp] - gx[sp];
           const dgy = gy[tp] - gy[sp];
-          sum += wgt * (dr * dr + dg * dg + db * db + GRAD_W * (dgx * dgx + dgy * dgy));
+          sum +=
+            wgt *
+            (dr * dr + dg * dg + db * db + GRAD_W * (dgx * dgx + dgy * dgy));
           wsum += wgt;
         }
         if (sum >= cutoff) return Infinity;
@@ -825,9 +862,12 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
 
     const consider = (i: number, si: number): void => {
       const ti = tg[i];
-      const tx = ti % w, ty = (ti - tx) / w;
-      const sx = si % w, sy = (si - sx) / w;
-      const ddx = sx - tx, ddy = sy - ty;
+      const tx = ti % w,
+        ty = (ti - tx) / w;
+      const sx = si % w,
+        sy = (si - sx) / w;
+      const ddx = sx - tx,
+        ddy = sy - ty;
       const pen = (ddx * ddx + ddy * ddy) * distW;
       if (pen >= best[i]) return;
       const d = patchDist(ti, si, best[i] - pen);
@@ -848,7 +888,8 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
       // both sides instead of the fill following the smooth estimate.
       const depth = new Int32Array(w * h).fill(-1);
       const q = new Int32Array(w * h);
-      let qh = 0, qt = 0;
+      let qh = 0,
+        qt = 0;
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           const i = y * w + x;
@@ -869,15 +910,28 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
         const x = i % w;
         const y = (i - x) / w;
         const nd = depth[i] + 1;
-        if (x > 0 && mask[i - 1] && depth[i - 1] < 0) { depth[i - 1] = nd; q[qt++] = i - 1; }
-        if (x < w - 1 && mask[i + 1] && depth[i + 1] < 0) { depth[i + 1] = nd; q[qt++] = i + 1; }
-        if (y > 0 && mask[i - w] && depth[i - w] < 0) { depth[i - w] = nd; q[qt++] = i - w; }
-        if (y < h - 1 && mask[i + w] && depth[i + w] < 0) { depth[i + w] = nd; q[qt++] = i + w; }
+        if (x > 0 && mask[i - 1] && depth[i - 1] < 0) {
+          depth[i - 1] = nd;
+          q[qt++] = i - 1;
+        }
+        if (x < w - 1 && mask[i + 1] && depth[i + 1] < 0) {
+          depth[i + 1] = nd;
+          q[qt++] = i + 1;
+        }
+        if (y > 0 && mask[i - w] && depth[i - w] < 0) {
+          depth[i - w] = nd;
+          q[qt++] = i - w;
+        }
+        if (y < h - 1 && mask[i + w] && depth[i + w] < 0) {
+          depth[i + w] = nd;
+          q[qt++] = i + w;
+        }
       }
       const order = new Int32Array(tc);
       {
         let maxD = 0;
-        for (let i = 0; i < tc; i++) if (depth[tg[i]] > maxD) maxD = depth[tg[i]];
+        for (let i = 0; i < tc; i++)
+          if (depth[tg[i]] > maxD) maxD = depth[tg[i]];
         const cnt = new Int32Array(maxD + 2);
         for (let i = 0; i < tc; i++) cnt[depth[tg[i]] + 1]++;
         for (let d2 = 1; d2 <= maxD + 1; d2++) cnt[d2] += cnt[d2 - 1];
@@ -886,7 +940,8 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
       for (let k = 0; k < tc; k++) {
         const i = order[k];
         const ti = tg[i];
-        const tx = ti % w, ty = (ti - tx) / w;
+        const tx = ti % w,
+          ty = (ti - tx) / w;
         for (let dy = -1; dy <= 1; dy++) {
           const ny = ty + dy;
           if (ny < 0 || ny >= h) continue;
@@ -907,7 +962,8 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
         for (let r2 = 8; r2 >= 1; r2 >>= 1) {
           const cur = offs[i];
           if (cur < 0) break;
-          const cx = cur % w, cy = (cur - cx) / w;
+          const cx = cur % w,
+            cy = (cur - cx) / w;
           const rx = cx + (((Math.random() * (2 * r2 + 1)) | 0) - r2);
           const ry = cy + (((Math.random() * (2 * r2 + 1)) | 0) - r2);
           if (clear(rx, ry)) consider(i, ry * w + rx);
@@ -928,12 +984,14 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
       // Only targets with nothing to inherit fall back to best-of-random.
       for (let i = 0; i < tc; i++) {
         const ti = tg[i];
-        const tx = ti % w, ty = (ti - tx) / w;
+        const tx = ti % w,
+          ty = (ti - tx) / w;
         if (prevOffsets && prevOrd) {
           const pi = prevOrd[(ty >> 1) * prevW + (tx >> 1)];
           if (pi >= 0 && prevOffsets[pi] >= 0) {
             const ps = prevOffsets[pi];
-            const psx = ps % prevW, psy = (ps - psx) / prevW;
+            const psx = ps % prevW,
+              psy = (ps - psx) / prevW;
             const sx = tx + (psx - (tx >> 1)) * 2;
             const sy = ty + (psy - (ty >> 1)) * 2;
             if (clear(sx, sy)) offs[i] = sy * w + sx;
@@ -961,8 +1019,10 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
       const s = offs[i];
       if (s < 0) continue;
       const ti = tg[i];
-      const tx = ti % w, ty = (ti - tx) / w;
-      const sx = s % w, sy = (s - sx) / w;
+      const tx = ti % w,
+        ty = (ti - tx) / w;
+      const sx = s % w,
+        sy = (s - sx) / w;
       const pen = ((sx - tx) * (sx - tx) + (sy - ty) * (sy - ty)) * distW;
       best[i] = patchDist(ti, s, Infinity) + pen;
     }
@@ -991,7 +1051,11 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
           const j = od[ny];
           if (j >= 0 && offs[j] >= 0) {
             const cand = offs[j] - step * w;
-            if (cand >= 0 && cand < w * h && clear(cand % w, (cand - (cand % w)) / w)) {
+            if (
+              cand >= 0 &&
+              cand < w * h &&
+              clear(cand % w, (cand - (cand % w)) / w)
+            ) {
               consider(i, cand);
             }
           }
@@ -999,7 +1063,8 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
         for (let r = searchStart; r >= 1; r >>= 1) {
           const cur = offs[i];
           if (cur < 0) break;
-          const cx = cur % w, cy = (cur - cx) / w;
+          const cx = cur % w,
+            cy = (cur - cx) / w;
           const rx = cx + (((Math.random() * (2 * r + 1)) | 0) - r);
           const ry = cy + (((Math.random() * (2 * r + 1)) | 0) - r);
           if (clear(rx, ry)) consider(i, ry * w + rx);
@@ -1031,7 +1096,8 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
           const ti = tg[i];
           const cur = offs[i];
           if (cur < 0) continue;
-          const tx = ti % w, ty = (ti - tx) / w;
+          const tx = ti % w,
+            ty = (ti - tx) / w;
           let agree = 0;
           const cands: number[] = [];
           for (const d of dirs) {
@@ -1045,14 +1111,19 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
             else if (cand >= 0 && cand < w * h) cands.push(cand);
           }
           if (agree >= 2 || cands.length === 0) continue;
-          let bc = -1, bd = Infinity;
+          let bc = -1,
+            bd = Infinity;
           for (const cand of cands) {
             const cx = cand % w;
             if (!clear(cx, (cand - cx) / w)) continue;
-            const sx = cand % w, sy = (cand - sx) / w;
+            const sx = cand % w,
+              sy = (cand - sx) / w;
             const pen = ((sx - tx) * (sx - tx) + (sy - ty) * (sy - ty)) * distW;
             const d2 = patchDist(ti, cand, Infinity) + pen;
-            if (d2 < bd) { bd = d2; bc = cand; }
+            if (d2 < bd) {
+              bd = d2;
+              bc = cand;
+            }
           }
           if (bc >= 0 && bd <= best[i] * 1.25 + 300) {
             offs[i] = bc;
@@ -1118,12 +1189,14 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
     const s = offsets[i];
     if (s < 0) continue;
     const tx = ti % bw;
-    const sx = s % bw, sy = (s - sx) / bw;
+    const sx = s % bw,
+      sy = (s - sx) / bw;
     if (tx < bw - 1) {
       const j = ord[ti + 1];
       if (j >= 0 && offsets[j] >= 0) {
         const s2 = offsets[j];
-        const sx2 = s2 % bw, sy2 = (s2 - sx2) / bw;
+        const sx2 = s2 % bw,
+          sy2 = (s2 - sx2) / bw;
         if (
           Math.abs(sx2 - sx - 1) + Math.abs(sy2 - sy) > 2 &&
           Math.min(misfit(ti + 1, s + 1), misfit(ti, s2 - 1)) > SEAM_TOL
@@ -1137,7 +1210,8 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
       const j = ord[ti + bw];
       if (j >= 0 && offsets[j] >= 0) {
         const s2 = offsets[j];
-        const sx2 = s2 % bw, sy2 = (s2 - sx2) / bw;
+        const sx2 = s2 % bw,
+          sy2 = (s2 - sx2) / bw;
         if (
           Math.abs(sx2 - sx) + Math.abs(sy2 - sy - 1) > 2 &&
           Math.min(misfit(ti + bw, s + bw), misfit(ti, s2 - bw)) > SEAM_TOL
@@ -1172,8 +1246,17 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
   const clearMap = new Uint8Array(bw * bh);
   for (let y = R; y <= bh - 1 - R; y++) {
     for (let x = R; x <= bw - 1 - R; x++) {
-      const x0 = x - R, y0 = y - R, x1 = x + R + 1, y1 = y + R + 1;
-      if (sat[y1 * satW + x1] - sat[y0 * satW + x1] - sat[y1 * satW + x0] + sat[y0 * satW + x0] === 0) {
+      const x0 = x - R,
+        y0 = y - R,
+        x1 = x + R + 1,
+        y1 = y + R + 1;
+      if (
+        sat[y1 * satW + x1] -
+          sat[y0 * satW + x1] -
+          sat[y1 * satW + x0] +
+          sat[y0 * satW + x0] ===
+        0
+      ) {
         clearMap[y * bw + x] = 1;
       }
     }
@@ -1189,7 +1272,18 @@ function computePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
 // this frame's pixels, switching only on a decisive improvement so stable
 // copies never churn between frames.
 function refinePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
-  const { bw, bh, targets, boxMask, cs, cw, ch, bilinCells, bilinW, coarseVal } = plan;
+  const {
+    bw,
+    bh,
+    targets,
+    boxMask,
+    cs,
+    cw,
+    ch,
+    bilinCells,
+    bilinW,
+    coarseVal,
+  } = plan;
   const offs = plan.offsets;
   const clearMap = plan.clearMap;
   const od = plan.ordMap;
@@ -1215,9 +1309,12 @@ function refinePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
 
   const distW = 600 / (bw * bw + bh * bh);
   const patchDist = (ti: number, si: number, cutoff: number): number => {
-    const tx = ti % bw, ty = (ti - tx) / bw;
-    const sx = si % bw, sy = (si - sx) / bw;
-    let sum = 0, wsum = 0;
+    const tx = ti % bw,
+      ty = (ti - tx) / bw;
+    const sx = si % bw,
+      sy = (si - sx) / bw;
+    let sum = 0,
+      wsum = 0;
     for (let dy = -R; dy <= R; dy++) {
       const tyy = ty + dy;
       if (tyy < 0 || tyy >= bh) continue;
@@ -1247,9 +1344,13 @@ function refinePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
     const s = offs[i];
     if (s < 0) continue;
     const ti = targets[i];
-    const tx = ti % bw, ty = (ti - tx) / bw;
-    const sx = s % bw, sy = (s - sx) / bw;
-    cur[i] = patchDist(ti, s, Infinity) + ((sx - tx) * (sx - tx) + (sy - ty) * (sy - ty)) * distW;
+    const tx = ti % bw,
+      ty = (ti - tx) / bw;
+    const sx = s % bw,
+      sy = (s - sx) / bw;
+    cur[i] =
+      patchDist(ti, s, Infinity) +
+      ((sx - tx) * (sx - tx) + (sy - ty) * (sy - ty)) * distW;
   }
 
   const adopt = (i: number, cand: number, d: number): void => {
@@ -1291,11 +1392,13 @@ function refinePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
     for (let s2 = 0; s2 < t; s2++) {
       const i = rev ? t - 1 - s2 : s2;
       const ti = targets[i];
-      const tx = ti % bw, ty = (ti - tx) / bw;
+      const tx = ti % bw,
+        ty = (ti - tx) / bw;
       const tryCand = (cand: number): void => {
         if (cand < 0 || cand >= bw * bh) return;
         if (!clearMap[cand] || cand === offs[i]) return;
-        const cx = cand % bw, cy = (cand - cx) / bw;
+        const cx = cand % bw,
+          cy = (cand - cx) / bw;
         const pen = ((cx - tx) * (cx - tx) + (cy - ty) * (cy - ty)) * distW;
         const limit = cur[i] * ACCEPT;
         if (pen >= limit) return;
@@ -1315,7 +1418,8 @@ function refinePatchOffsets(plan: InpaintPlan, px: Uint8ClampedArray): void {
       for (let r = 6; r >= 1; r >>= 1) {
         const curOff = offs[i];
         if (curOff < 0) break;
-        const cx2 = curOff % bw, cy2 = (curOff - cx2) / bw;
+        const cx2 = curOff % bw,
+          cy2 = (curOff - cx2) / bw;
         const rx = cx2 + (((Math.random() * (2 * r + 1)) | 0) - r);
         const ry = cy2 + (((Math.random() * (2 * r + 1)) | 0) - r);
         if (rx >= 0 && rx < bw && ry >= 0 && ry < bh) tryCand(ry * bw + rx);
@@ -1341,7 +1445,10 @@ function removeAshWatermark(
   mirror: Int32Array,
   t: number,
 ): boolean {
-  let sumDr = 0, sumDg = 0, sumDb = 0, n = 0;
+  let sumDr = 0,
+    sumDg = 0,
+    sumDb = 0,
+    n = 0;
   let posLum = 0;
 
   for (let i = 0; i < t; i++) {
@@ -1352,7 +1459,9 @@ function removeAshWatermark(
     const dr = px[di] - px[mi];
     const dg = px[di + 1] - px[mi + 1];
     const db = px[di + 2] - px[mi + 2];
-    sumDr += dr; sumDg += dg; sumDb += db;
+    sumDr += dr;
+    sumDg += dg;
+    sumDb += db;
     const lIn = px[di] * 0.299 + px[di + 1] * 0.587 + px[di + 2] * 0.114;
     const lOut = px[mi] * 0.299 + px[mi + 1] * 0.587 + px[mi + 2] * 0.114;
     if (lIn > lOut) posLum++;
@@ -1384,12 +1493,31 @@ function removeAshWatermark(
 
 function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
   const {
-    bx, by, bw, bh,
-    targets, boxMask,
-    cs, cw, ch, coarseKnown, coarseIters,
-    bilinCells, bilinW, mirror, mirrorCells, mirrorW, texScale,
-    fineIterations, blurPixels, blurBlend, scratch, tScratch,
-    coarseVal, coarseSum, coarseCnt,
+    bx,
+    by,
+    bw,
+    bh,
+    targets,
+    boxMask,
+    cs,
+    cw,
+    ch,
+    coarseKnown,
+    coarseIters,
+    bilinCells,
+    bilinW,
+    mirror,
+    mirrorCells,
+    mirrorW,
+    texScale,
+    fineIterations,
+    blurPixels,
+    blurBlend,
+    scratch,
+    tScratch,
+    coarseVal,
+    coarseSum,
+    coarseCnt,
   } = plan;
   const imageData = ctx.getImageData(bx, by, bw, bh);
   const px = imageData.data;
@@ -1417,7 +1545,10 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
       coarseCnt[cell]++;
     }
   }
-  let mr = 0, mg = 0, mb2 = 0, mn = 0;
+  let mr = 0,
+    mg = 0,
+    mb2 = 0,
+    mn = 0;
   for (let c = 0; c < cw * ch; c++) {
     if (coarseCnt[c] > 0) {
       coarseVal[c * 3] = coarseSum[c * 3] / coarseCnt[c];
@@ -1430,7 +1561,9 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
     }
   }
   if (mn > 0) {
-    mr /= mn; mg /= mn; mb2 /= mn;
+    mr /= mn;
+    mg /= mn;
+    mb2 /= mn;
   }
   for (let c = 0; c < cw * ch; c++) {
     if (!coarseKnown[c]) {
@@ -1451,21 +1584,50 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
       const r = (x < cw - 1 ? c + 1 : c) * 3;
       const u = (y > 0 ? c - cw : c) * 3;
       const d = (y < ch - 1 ? c + cw : c) * 3;
-      coarseVal[c * 3] = (coarseVal[l] + coarseVal[r] + coarseVal[u] + coarseVal[d]) * 0.25;
-      coarseVal[c * 3 + 1] = (coarseVal[l + 1] + coarseVal[r + 1] + coarseVal[u + 1] + coarseVal[d + 1]) * 0.25;
-      coarseVal[c * 3 + 2] = (coarseVal[l + 2] + coarseVal[r + 2] + coarseVal[u + 2] + coarseVal[d + 2]) * 0.25;
+      coarseVal[c * 3] =
+        (coarseVal[l] + coarseVal[r] + coarseVal[u] + coarseVal[d]) * 0.25;
+      coarseVal[c * 3 + 1] =
+        (coarseVal[l + 1] +
+          coarseVal[r + 1] +
+          coarseVal[u + 1] +
+          coarseVal[d + 1]) *
+        0.25;
+      coarseVal[c * 3 + 2] =
+        (coarseVal[l + 2] +
+          coarseVal[r + 2] +
+          coarseVal[u + 2] +
+          coarseVal[d + 2]) *
+        0.25;
     }
   }
 
   // Stage 2: upsample the coarse field into the masked pixels.
   for (let i = 0; i < t; i++) {
     const o = i * 4;
-    const c0 = bilinCells[o] * 3, c1 = bilinCells[o + 1] * 3, c2 = bilinCells[o + 2] * 3, c3 = bilinCells[o + 3] * 3;
-    const w0 = bilinW[o], w1 = bilinW[o + 1], w2 = bilinW[o + 2], w3 = bilinW[o + 3];
+    const c0 = bilinCells[o] * 3,
+      c1 = bilinCells[o + 1] * 3,
+      c2 = bilinCells[o + 2] * 3,
+      c3 = bilinCells[o + 3] * 3;
+    const w0 = bilinW[o],
+      w1 = bilinW[o + 1],
+      w2 = bilinW[o + 2],
+      w3 = bilinW[o + 3];
     const di = targets[i] * 4;
-    px[di] = coarseVal[c0] * w0 + coarseVal[c1] * w1 + coarseVal[c2] * w2 + coarseVal[c3] * w3;
-    px[di + 1] = coarseVal[c0 + 1] * w0 + coarseVal[c1 + 1] * w1 + coarseVal[c2 + 1] * w2 + coarseVal[c3 + 1] * w3;
-    px[di + 2] = coarseVal[c0 + 2] * w0 + coarseVal[c1 + 2] * w1 + coarseVal[c2 + 2] * w2 + coarseVal[c3 + 2] * w3;
+    px[di] =
+      coarseVal[c0] * w0 +
+      coarseVal[c1] * w1 +
+      coarseVal[c2] * w2 +
+      coarseVal[c3] * w3;
+    px[di + 1] =
+      coarseVal[c0 + 1] * w0 +
+      coarseVal[c1 + 1] * w1 +
+      coarseVal[c2 + 1] * w2 +
+      coarseVal[c3 + 1] * w3;
+    px[di + 2] =
+      coarseVal[c0 + 2] * w0 +
+      coarseVal[c1 + 2] * w1 +
+      coarseVal[c2 + 2] * w2 +
+      coarseVal[c3 + 2] * w3;
   }
 
   // Stages 3+4 (fallback path): fine diffusion anchored to the boundary,
@@ -1482,8 +1644,10 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
         const ui = (y > 0 ? idx - bw : idx) * 4;
         const di = (y < bh - 1 ? idx + bw : idx) * 4;
         tScratch[i * 3] = (px[li] + px[ri] + px[ui] + px[di]) * 0.25;
-        tScratch[i * 3 + 1] = (px[li + 1] + px[ri + 1] + px[ui + 1] + px[di + 1]) * 0.25;
-        tScratch[i * 3 + 2] = (px[li + 2] + px[ri + 2] + px[ui + 2] + px[di + 2]) * 0.25;
+        tScratch[i * 3 + 1] =
+          (px[li + 1] + px[ri + 1] + px[ui + 1] + px[di + 1]) * 0.25;
+        tScratch[i * 3 + 2] =
+          (px[li + 2] + px[ri + 2] + px[ui + 2] + px[di + 2]) * 0.25;
       }
       for (let i = 0; i < t; i++) {
         const di = targets[i] * 4;
@@ -1499,8 +1663,14 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
       let strength = TEXTURE_STRENGTH * texScale[i];
       if (strength < 0.04) continue;
       const o = i * 4;
-      const c0 = mirrorCells[o] * 3, c1 = mirrorCells[o + 1] * 3, c2 = mirrorCells[o + 2] * 3, c3 = mirrorCells[o + 3] * 3;
-      const w0 = mirrorW[o], w1 = mirrorW[o + 1], w2 = mirrorW[o + 2], w3 = mirrorW[o + 3];
+      const c0 = mirrorCells[o] * 3,
+        c1 = mirrorCells[o + 1] * 3,
+        c2 = mirrorCells[o + 2] * 3,
+        c3 = mirrorCells[o + 3] * 3;
+      const w0 = mirrorW[o],
+        w1 = mirrorW[o + 1],
+        w2 = mirrorW[o + 2],
+        w3 = mirrorW[o + 3];
       const si = m * 4;
       const di = targets[i] * 4;
       // Similarity guard: if the mirrored source sits in a differently colored
@@ -1508,13 +1678,21 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
       // foreign content is never copied in.
       let regionDiff = 0;
       for (let c = 0; c < 3; c++) {
-        const low = coarseVal[c0 + c] * w0 + coarseVal[c1 + c] * w1 + coarseVal[c2 + c] * w2 + coarseVal[c3 + c] * w3;
+        const low =
+          coarseVal[c0 + c] * w0 +
+          coarseVal[c1 + c] * w1 +
+          coarseVal[c2 + c] * w2 +
+          coarseVal[c3 + c] * w3;
         const d = px[di + c] - low;
         regionDiff += d < 0 ? -d : d;
       }
       strength *= 1 / (1 + regionDiff / 60);
       for (let c = 0; c < 3; c++) {
-        const low = coarseVal[c0 + c] * w0 + coarseVal[c1 + c] * w1 + coarseVal[c2 + c] * w2 + coarseVal[c3 + c] * w3;
+        const low =
+          coarseVal[c0 + c] * w0 +
+          coarseVal[c1 + c] * w1 +
+          coarseVal[c2 + c] * w2 +
+          coarseVal[c3 + c] * w3;
         let res = (px[si + c] - low) * strength;
         if (res > TEXTURE_CLAMP) res = TEXTURE_CLAMP;
         else if (res < -TEXTURE_CLAMP) res = -TEXTURE_CLAMP;
@@ -1584,13 +1762,33 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
       const o = i * 4;
       const si = s * 4;
       const di = targets[i] * 4;
-      const b0 = bilinCells[o] * 3, b1 = bilinCells[o + 1] * 3, b2 = bilinCells[o + 2] * 3, b3 = bilinCells[o + 3] * 3;
-      const v0 = bilinW[o], v1 = bilinW[o + 1], v2 = bilinW[o + 2], v3 = bilinW[o + 3];
-      const c0 = sCells[o] * 3, c1 = sCells[o + 1] * 3, c2 = sCells[o + 2] * 3, c3 = sCells[o + 3] * 3;
-      const u0 = sWgt[o], u1 = sWgt[o + 1], u2 = sWgt[o + 2], u3 = sWgt[o + 3];
+      const b0 = bilinCells[o] * 3,
+        b1 = bilinCells[o + 1] * 3,
+        b2 = bilinCells[o + 2] * 3,
+        b3 = bilinCells[o + 3] * 3;
+      const v0 = bilinW[o],
+        v1 = bilinW[o + 1],
+        v2 = bilinW[o + 2],
+        v3 = bilinW[o + 3];
+      const c0 = sCells[o] * 3,
+        c1 = sCells[o + 1] * 3,
+        c2 = sCells[o + 2] * 3,
+        c3 = sCells[o + 3] * 3;
+      const u0 = sWgt[o],
+        u1 = sWgt[o + 1],
+        u2 = sWgt[o + 2],
+        u3 = sWgt[o + 3];
       for (let c = 0; c < 3; c++) {
-        const lowT = coarseVal[b0 + c] * v0 + coarseVal[b1 + c] * v1 + coarseVal[b2 + c] * v2 + coarseVal[b3 + c] * v3;
-        const lowS = coarseVal[c0 + c] * u0 + coarseVal[c1 + c] * u1 + coarseVal[c2 + c] * u2 + coarseVal[c3 + c] * u3;
+        const lowT =
+          coarseVal[b0 + c] * v0 +
+          coarseVal[b1 + c] * v1 +
+          coarseVal[b2 + c] * v2 +
+          coarseVal[b3 + c] * v3;
+        const lowS =
+          coarseVal[c0 + c] * u0 +
+          coarseVal[c1 + c] * u1 +
+          coarseVal[c2 + c] * u2 +
+          coarseVal[c3 + c] * u3;
         const delta = lowT - lowS;
         if (isFirstFrame) base[i * 3 + c] = delta;
         // Only the change since the first frame is applied, attenuated and
@@ -1639,7 +1837,11 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
 
   // Stage 5: feathered blur along the seam.
   scratch.set(px);
-  for (let j = __inpaintDbg.noEdgeBlur ? blurPixels.length : 0; j < blurPixels.length; j++) {
+  for (
+    let j = __inpaintDbg.noEdgeBlur ? blurPixels.length : 0;
+    j < blurPixels.length;
+    j++
+  ) {
     const idx = blurPixels[j];
     const x = idx % bw;
     const y = (idx - x) / bw;
@@ -1697,7 +1899,11 @@ export async function removeWatermarkFromCanvas(
   maskDataUrl: string | null,
 ): Promise<HTMLCanvasElement> {
   if (!maskDataUrl) return sourceCanvas;
-  const plan = await buildInpaintPlan(maskDataUrl, sourceCanvas.width, sourceCanvas.height);
+  const plan = await buildInpaintPlan(
+    maskDataUrl,
+    sourceCanvas.width,
+    sourceCanvas.height,
+  );
   if (!plan) return sourceCanvas;
 
   const outCanvas = document.createElement("canvas");
@@ -1723,7 +1929,11 @@ export async function removeWatermarkFromImage(
   if (!ctx) throw new Error("Canvas 2D context not available");
   ctx.drawImage(img, 0, 0);
   if (maskDataUrl) {
-    const plan = await buildInpaintPlan(maskDataUrl, canvas.width, canvas.height);
+    const plan = await buildInpaintPlan(
+      maskDataUrl,
+      canvas.width,
+      canvas.height,
+    );
     if (plan) applyInpaintPlan(ctx, plan);
   }
   return canvas;
@@ -1758,15 +1968,14 @@ export async function removeBackgroundFromCanvas(
   maskCtx.drawImage(maskImg, 0, 0, w, h);
   const maskPixels = maskCtx.getImageData(0, 0, w, h).data;
 
-  // Soft matte: fully brushed pixels go transparent, the brush's anti-aliased
-  // edge gets a graded alpha so the cutout edge is feathered, not jagged.
-  const SOLID = 130;
-  const EDGE = 24;
+  // Strict cutout: only the marked background becomes transparent. Foreground
+  // pixels keep their original RGB and alpha values unchanged.
+  const THRESHOLD = 128;
   for (let i = 0; i < w * h; i++) {
-    const a = maskPixels[i * 4 + 3];
-    if (a <= EDGE) continue;
-    const m = a >= SOLID ? 1 : (a - EDGE) / (SOLID - EDGE);
-    pixels[i * 4 + 3] = Math.round(pixels[i * 4 + 3] * (1 - m));
+    const maskAlpha = maskPixels[i * 4 + 3];
+    if (maskAlpha > THRESHOLD) {
+      pixels[i * 4 + 3] = 0;
+    }
   }
 
   outCtx.putImageData(outData, 0, 0);
@@ -1789,6 +1998,52 @@ export async function removeBackgroundFromImage(
 // Automatically remove the background from an image without a brush mask.
 // Samples the dominant color at the image edges and removes matching pixels
 // with a soft matte transition. Works best on images with uniform backgrounds.
+
+
+function clusterColors(
+  colorSamples: number[][],
+  maxClusters: number,
+): { r: number; g: number; b: number; weight: number }[] {
+  const quant = (v: number) => Math.floor(v / 18);
+  const hist = new Map<number, { count: number; r: number; g: number; b: number }>();
+  for (const [r, g, b] of colorSamples) {
+    const key = (quant(r) << 10) | (quant(g) << 5) | quant(b);
+    const entry = hist.get(key) || { count: 0, r: 0, g: 0, b: 0 };
+    entry.count++;
+    entry.r += r;
+    entry.g += g;
+    entry.b += b;
+    hist.set(key, entry);
+  }
+  const avg = [...hist.entries()]
+    .map(([_, v]) => ({
+      r: v.r / v.count,
+      g: v.g / v.count,
+      b: v.b / v.count,
+      weight: v.count,
+    }))
+    .sort((a, b) => b.weight - a.weight);
+
+  const out: typeof avg = [];
+  for (const c of avg) {
+    let tooClose = false;
+    for (const existing of out) {
+      const d = Math.sqrt(
+        (c.r - existing.r) ** 2 +
+          (c.g - existing.g) ** 2 +
+          (c.b - existing.b) ** 2,
+      );
+      if (d < 40) {
+        tooClose = true;
+        break;
+      }
+    }
+    if (!tooClose) out.push(c);
+    if (out.length >= maxClusters) break;
+  }
+  return out;
+}
+
 export async function autoRemoveBackgroundFromImage(
   img: HTMLImageElement,
 ): Promise<HTMLCanvasElement> {
@@ -1805,43 +2060,74 @@ export async function autoRemoveBackgroundFromImage(
   const imageData = ctx.getImageData(0, 0, w, h);
   const px = imageData.data;
 
-  // ── Step 1: Sample a thick border strip ──
-  // Using a thicker border (up to 5% of min dimension) avoids sampling the
-  // subject when it extends to the image edge. We also skip the center 60%
-  // region when building the background model so the subject's own colors
-  // don't contaminate it.
+  // ---- Color model from edge samples ----
   const borderW = Math.max(2, Math.floor(Math.min(w, h) * 0.04));
   const step = Math.max(1, Math.floor(Math.min(w, h) / 120));
-  const centerCx = w >> 1, centerCy = h >> 1;
+  const centerCx = w >> 1,
+    centerCy = h >> 1;
   const centerR = Math.min(w, h) * 0.25;
 
-  const samples: number[][] = [];
+  // Corners are the one part of the border a photographed subject almost
+  // never reaches — shoulders/hair/arms commonly touch the MIDDLE of an
+  // edge, corner-to-corner subjects are rare. Use them as a trusted seed so
+  // a subject touching the border can't get sampled into, and then become,
+  // its own "background" cluster.
+  const cornerSize = borderW;
+  const cornerSamples: number[][] = [];
+  for (const [cx0, cy0] of [
+    [0, 0],
+    [w - cornerSize, 0],
+    [0, h - cornerSize],
+    [w - cornerSize, h - cornerSize],
+  ] as [number, number][]) {
+    for (let yy = 0; yy < cornerSize; yy++) {
+      for (let xx = 0; xx < cornerSize; xx++) {
+        const i = ((cy0 + yy) * w + (cx0 + xx)) * 4;
+        cornerSamples.push([px[i], px[i + 1], px[i + 2]]);
+      }
+    }
+  }
+  const seedClusters = clusterColors(cornerSamples, 3);
 
+  const samples: number[][] = [...cornerSamples];
   const addSample = (x: number, y: number) => {
-    // Skip points inside the central region (likely subject).
-    const dx = x - centerCx, dy = y - centerCy;
+    const dx = x - centerCx,
+      dy = y - centerCy;
     if (dx * dx + dy * dy < centerR * centerR) return;
     const i = (y * w + x) * 4;
-    samples.push([px[i], px[i + 1], px[i + 2]]);
+    const r = px[i],
+      g = px[i + 1],
+      b = px[i + 2];
+    if (seedClusters.length > 0) {
+      let matchesSeed = false;
+      for (const c of seedClusters) {
+        if (
+          Math.abs(r - c.r) < 40 &&
+          Math.abs(g - c.g) < 40 &&
+          Math.abs(b - c.b) < 40
+        ) {
+          matchesSeed = true;
+          break;
+        }
+      }
+      if (!matchesSeed) return;
+    }
+    samples.push([r, g, b]);
   };
 
-  // Top and bottom strips
   for (let x = 0; x < w; x += step) {
     for (let by = 0; by < borderW; by++) {
       addSample(x, by);
       addSample(x, h - 1 - by);
     }
   }
-  // Left and right strips (avoid re-sampling corners)
   for (let y = borderW; y < h - borderW; y += step) {
     for (let bx = 0; bx < borderW; bx++) {
       addSample(bx, y);
       addSample(w - 1 - bx, y);
     }
   }
-
   if (samples.length < 10) {
-    // Fallback: sample everywhere
     for (let y = 0; y < h; y += step * 2) {
       for (let x = 0; x < w; x += step * 2) {
         const i = (y * w + x) * 4;
@@ -1850,71 +2136,60 @@ export async function autoRemoveBackgroundFromImage(
     }
   }
 
-  // ── Step 2: Find up to 3 dominant background color clusters ──
-  // Quantise colours to 4-bit per channel (16³ = 4096 bins) and pick the
-  // most frequent bins that are sufficiently far apart in colour space.
-  const quant = (v: number) => Math.floor(v / 18);
-  const hist = new Map<number, { count: number; r: number; g: number; b: number }>();
-  for (const [r, g, b] of samples) {
-    const key = (quant(r) << 10) | (quant(g) << 5) | quant(b);
-    const entry = hist.get(key) || { count: 0, r: 0, g: 0, b: 0 };
-    entry.count++;
-    entry.r += r; entry.g += g; entry.b += b;
-    hist.set(key, entry);
+  const clusters = clusterColors(samples, 3);
+  if (clusters.length === 0) {
+    clusters.push({ r: 255, g: 255, b: 255, weight: 1 });
   }
 
-  const avgClusters = [...hist.entries()]
-    .map(([_, v]) => ({
-      r: v.r / v.count, g: v.g / v.count, b: v.b / v.count,
-      weight: v.count,
-    }))
-    .sort((a, b) => b.weight - a.weight);
-
-  // Greedily pick top clusters that are at least 40 apart in colour space.
-  const clusters: typeof avgClusters = [];
-  for (const c of avgClusters) {
-    let tooClose = false;
-    for (const existing of clusters) {
-      const d = Math.sqrt(
-        (c.r - existing.r) ** 2 +
-        (c.g - existing.g) ** 2 +
-        (c.b - existing.b) ** 2,
-      );
-      if (d < 40) { tooClose = true; break; }
+  // Assign each border sample to its nearest cluster before measuring spread.
+// Averaging every sample's distance against every cluster (the old code)
+// meant a cluster's "deviation" included how far unrelated clusters' colors
+// were from it, which pushed tolerance to the ceiling for every cluster.
+const nearestCluster = samples.map(([r, g, b]) => {
+  let best = 0;
+  let bestD = Infinity;
+  for (let ci = 0; ci < clusters.length; ci++) {
+    const c = clusters[ci];
+    const d = (r - c.r) ** 2 + (g - c.g) ** 2 + (b - c.b) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = ci;
     }
-    if (!tooClose) clusters.push(c);
-    if (clusters.length >= 3) break;
   }
+  return best;
+});
 
-  if (clusters.length === 0) clusters.push(avgClusters[0] || { r: 255, g: 255, b: 255, weight: 1 });
+const bgModels = clusters.map((bg, ci) => {
+  let devR = 0,
+    devG = 0,
+    devB = 0,
+    n = 0;
+  for (let si = 0; si < samples.length; si++) {
+    if (nearestCluster[si] !== ci) continue;
+    const [r, g, b] = samples[si];
+    devR += Math.abs(r - bg.r);
+    devG += Math.abs(g - bg.g);
+    devB += Math.abs(b - bg.b);
+    n++;
+  }
+  if (n === 0) n = 1;
+  return {
+    r: bg.r,
+    g: bg.g,
+    b: bg.b,
+    tolR: Math.max(28, Math.min(75, (devR / n) * 1.8)),
+    tolG: Math.max(28, Math.min(75, (devG / n) * 1.8)),
+    tolB: Math.max(28, Math.min(75, (devB / n) * 1.8)),
+  };
+});
 
-  // ── Step 3: Per-cluster tolerance ──
-  const bgModels = clusters.map((bg) => {
-    let devR = 0, devG = 0, devB = 0, n = 0;
-    for (const [r, g, b] of samples) {
-      devR += Math.abs(r - bg.r);
-      devG += Math.abs(g - bg.g);
-      devB += Math.abs(b - bg.b);
-      n++;
-    }
-    return {
-      r: bg.r, g: bg.g, b: bg.b,
-      tolR: Math.max(28, Math.min(75, (devR / n) * 1.8)),
-      tolG: Math.max(28, Math.min(75, (devG / n) * 1.8)),
-      tolB: Math.max(28, Math.min(75, (devB / n) * 1.8)),
-    };
-  });
-
-  // ── Step 4: Build soft alpha mask ──
-  // For each pixel, find the closest-matching background cluster. If the
-  // normalised distance is below 1.0 the pixel is progressively made
-  // transparent; above 1.4 it stays fully opaque. The 0.4-wide ramp gives
-  // a natural feather.
+  // ---- Initial soft mask from color distance ----
   const mask = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) {
     const idx = i * 4;
-    const r = px[idx], g = px[idx + 1], b = px[idx + 2];
-
+    const r = px[idx],
+      g = px[idx + 1],
+      b = px[idx + 2];
     let bestD = Infinity;
     for (const m of bgModels) {
       const dr = Math.abs(r - m.r) / m.tolR;
@@ -1923,46 +2198,183 @@ export async function autoRemoveBackgroundFromImage(
       const d = Math.max(dr, dg, db);
       if (d < bestD) bestD = d;
     }
-
-    if (bestD < 1.4) {
-      mask[i] = bestD <= 1.0 ? 0 : Math.round(((bestD - 1.0) / 0.4) * 255);
-    } else {
+    // Map bestD to alpha: < 1 = transparent, 1-1.6 = transition, > 1.6 = opaque
+    if (bestD < 1.0) {
+      mask[i] = 0;
+    } else if (bestD > 1.6) {
       mask[i] = 255;
+    } else {
+      mask[i] = Math.round(((bestD - 1.0) / 0.6) * 255);
     }
   }
 
-  // ── Step 5: Feather the transition band ──
-  // A wider neighbourhood (3×3 → 8 neighbours) on intermediate values
-  // gives smoother edges without washing out solid areas.
+  // ---- Hole filling via flood fill through bg from edges ----
+  const bgBin = new Uint8Array(w * h); // 2=bg-connected, 1=fg, 0=unvisited-bg
+  for (let i = 0; i < w * h; i++) bgBin[i] = mask[i] < 128 ? 0 : 1;
+
+  const q = new Int32Array(w * h);
+  let qh = 0,
+    qt = 0;
+  for (let x = 0; x < w; x++) {
+    for (let by = 0; by < borderW; by++) {
+      const i1 = by * w + x,
+        i2 = (h - 1 - by) * w + x;
+      if (bgBin[i1] === 0) {
+        bgBin[i1] = 2;
+        q[qt++] = i1;
+      }
+      if (bgBin[i2] === 0) {
+        bgBin[i2] = 2;
+        q[qt++] = i2;
+      }
+    }
+  }
+  for (let y = borderW; y < h - borderW; y++) {
+    for (let bx = 0; bx < borderW; bx++) {
+      const i1 = y * w + bx,
+        i2 = y * w + (w - 1 - bx);
+      if (bgBin[i1] === 0) {
+        bgBin[i1] = 2;
+        q[qt++] = i1;
+      }
+      if (bgBin[i2] === 0) {
+        bgBin[i2] = 2;
+        q[qt++] = i2;
+      }
+    }
+  }
+  while (qh < qt) {
+    const idx = q[qh++];
+    const y = (idx / w) | 0,
+      x = idx - y * w;
+    if (x > 0) {
+      const n = idx - 1;
+      if (bgBin[n] === 0) {
+        bgBin[n] = 2;
+        q[qt++] = n;
+      }
+    }
+    if (x < w - 1) {
+      const n = idx + 1;
+      if (bgBin[n] === 0) {
+        bgBin[n] = 2;
+        q[qt++] = n;
+      }
+    }
+    if (y > 0) {
+      const n = idx - w;
+      if (bgBin[n] === 0) {
+        bgBin[n] = 2;
+        q[qt++] = n;
+      }
+    }
+    if (y < h - 1) {
+      const n = idx + w;
+      if (bgBin[n] === 0) {
+        bgBin[n] = 2;
+        q[qt++] = n;
+      }
+    }
+  }
+
+  // Holes (bg not reached from edge) → set to opaque fg
+  for (let i = 0; i < w * h; i++) {
+    if (bgBin[i] === 0) mask[i] = 255;
+  }
+
+  // Remove speckles: isolated fg pixels surrounded by bg → bg,
+  // isolated bg pixels surrounded by fg → fg.
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      let fgN = 0, bgN = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          if (mask[i + dy * w + dx] < 128) bgN++; else fgN++;
+        }
+      }
+      if (mask[i] >= 128 && bgN >= 6) mask[i] = 0;
+      else if (mask[i] < 128 && fgN >= 6) mask[i] = 255;
+    }
+  }
+
+  // ---- Edge-aware feather (bilateral-style) ----
+  // Expand the transition zone: for each bg-connected pixel adjacent to fg, set as transition
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      if (bgBin[i] !== 2) continue; // not true-bg
+      let hasFg = false;
+      for (let dy = -1; dy <= 1 && !hasFg; dy++) {
+        for (let dx = -1; dx <= 1 && !hasFg; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          if (bgBin[i + dy * w + dx] === 1) hasFg = true;
+        }
+      }
+      if (hasFg && mask[i] > 0) {
+        // Keep existing soft value, don't force to 0
+      } else if (hasFg) {
+        // Create transition: use color distance
+        const pi = i * 4;
+        let bestD = Infinity;
+        for (const m of bgModels) {
+          const dr = Math.abs(px[pi] - m.r) / m.tolR;
+          const dg = Math.abs(px[pi + 1] - m.g) / m.tolG;
+          const db = Math.abs(px[pi + 2] - m.b) / m.tolB;
+          const d = Math.max(dr, dg, db);
+          if (d < bestD) bestD = d;
+        }
+        if (bestD < 1.6) {
+          mask[i] =
+            bestD < 1.0
+              ? 0
+              : Math.round(Math.min(1, (bestD - 1.0) / 0.6) * 200);
+        }
+      } else {
+        mask[i] = 0; // deep bg → fully transparent
+      }
+    }
+  }
+
+  // Bilateral-style feather: smooth transition zone without crossing color edges
   const featherPass = (passes: number): void => {
     const tmp = new Uint8Array(w * h);
     for (let p = 0; p < passes; p++) {
       tmp.set(mask);
-      for (let y = 2; y < h - 2; y++) {
-        for (let x = 2; x < w - 2; x++) {
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
           const i = y * w + x;
-          const v = mask[i];
-          if (v === 0 || v === 255) continue;
-          let sum = 0, count = 0;
+          if (mask[i] === 0 || mask[i] === 255) continue;
+          let sum = 0,
+            wSum = 0;
           for (let dy = -1; dy <= 1; dy++) {
             for (let dx = -1; dx <= 1; dx++) {
               if (dx === 0 && dy === 0) continue;
-              sum += tmp[i + dy * w + dx];
-              count++;
+              const ni = i + dy * w + dx;
+              const pi = i * 4,
+                npi = ni * 4;
+              const cd =
+                Math.abs(px[pi] - px[npi]) +
+                Math.abs(px[pi + 1] - px[npi + 1]) +
+                Math.abs(px[pi + 2] - px[npi + 2]);
+              const wgt = 1 / (1 + cd * 0.02); // bilateral weight from color distance
+              sum += tmp[ni] * wgt;
+              wSum += wgt;
             }
           }
-          mask[i] = (sum + (count >> 1)) / count;
+          mask[i] = wSum > 0 ? sum / wSum : mask[i];
         }
       }
     }
   };
-  featherPass(3);
+  featherPass(1);
 
-  // ── Step 6: Apply mask → alpha channel ──
+  // Apply a strict binary mask: background pixels become fully transparent,
+  // while all other pixels remain untouched.
   for (let i = 0; i < w * h; i++) {
-    const a = mask[i];
-    if (a < 255) {
-      px[i * 4 + 3] = (px[i * 4 + 3] * a) >> 8;
+    if (mask[i] < 128) {
+      px[i * 4 + 3] = 0;
     }
   }
 
@@ -1977,7 +2389,10 @@ export function captureVideoFrame(videoUrl: string): Promise<string> {
     video.playsInline = true;
     video.preload = "auto";
     video.src = videoUrl;
-    const timer = setTimeout(() => reject(new Error("Video frame capture timeout")), 15000);
+    const timer = setTimeout(
+      () => reject(new Error("Video frame capture timeout")),
+      15000,
+    );
     video.onerror = () => {
       clearTimeout(timer);
       reject(new Error("Failed to load video"));
@@ -2002,10 +2417,18 @@ export function captureVideoFrame(videoUrl: string): Promise<string> {
   });
 }
 
-function buildEnhanceFilter(presetName: string, ctrl?: AdvancedControls): string {
+function buildEnhanceFilter(
+  presetName: string,
+  ctrl?: AdvancedControls,
+): string {
   if (presetName === "none") return "none";
   const p = (PRESETS as Record<string, Preset>)[presetName] || PRESETS.standard;
-  const controls = ctrl || { brightness: 0, contrast: 0, saturation: 0, sharpness: 0 };
+  const controls = ctrl || {
+    brightness: 0,
+    contrast: 0,
+    saturation: 0,
+    sharpness: 0,
+  };
   const b = 1 + (p.brightness + controls.brightness) / 100;
   const c = 1 + (p.contrast + controls.contrast) / 100;
   const s = 1 + (p.saturation + controls.saturation) / 100;
@@ -2042,12 +2465,28 @@ export async function processVideo(
 
   if (hasWebCodecs) {
     try {
-      return await processVideoOffline(videoFile, presetName, scale, ctrl, onProgress, maskDataUrl);
+      return await processVideoOffline(
+        videoFile,
+        presetName,
+        scale,
+        ctrl,
+        onProgress,
+        maskDataUrl,
+      );
     } catch (err) {
-      console.warn("Offline video pipeline failed, using realtime fallback:", err);
+      console.warn(
+        "Offline video pipeline failed, using realtime fallback:",
+        err,
+      );
     }
   }
-  return processVideoRealtime(videoUrl, presetName, ctrl, onProgress, maskDataUrl);
+  return processVideoRealtime(
+    videoUrl,
+    presetName,
+    ctrl,
+    onProgress,
+    maskDataUrl,
+  );
 }
 
 async function processVideoOffline(
@@ -2070,7 +2509,8 @@ async function processVideoOffline(
 
   const srcW = videoTrack.displayWidth;
   const srcH = videoTrack.displayHeight;
-  const scaleFactor = scale === "2x" ? 2 : scale === "4x" ? 4 : scale === "8k" ? 8 : 1;
+  const scaleFactor =
+    scale === "2x" ? 2 : scale === "4x" ? 4 : scale === "8k" ? 8 : 1;
   let w = Math.round(srcW * scaleFactor);
   let h = Math.round(srcH * scaleFactor);
   // Keep within what hardware H.264/VP9 encoders reliably accept.
@@ -2084,7 +2524,9 @@ async function processVideoOffline(
   if (h % 2) h--;
 
   // Cap the fine smoothing passes lower than for stills — it runs per frame.
-  const plan = maskDataUrl ? await buildInpaintPlan(maskDataUrl, w, h, 120) : null;
+  const plan = maskDataUrl
+    ? await buildInpaintPlan(maskDataUrl, w, h, 280)
+    : null;
   const filter = buildEnhanceFilter(presetName, ctrl);
   const resized = w !== srcW || h !== srcH;
   const needsCanvas = !!plan || filter !== "none";
@@ -2103,7 +2545,9 @@ async function processVideoOffline(
   // Fall back to WebM when the browser can't encode an MP4-compatible codec.
   const mp4 = new mb.Mp4OutputFormat();
   const webm = new mb.WebMOutputFormat();
-  let format: InstanceType<typeof mb.Mp4OutputFormat> | InstanceType<typeof mb.WebMOutputFormat> = mp4;
+  let format:
+    | InstanceType<typeof mb.Mp4OutputFormat>
+    | InstanceType<typeof mb.WebMOutputFormat> = mp4;
   let videoCodec = await mb.getFirstEncodableVideoCodec(
     mp4.getSupportedVideoCodecs(),
     { width: w, height: h },
@@ -2115,7 +2559,8 @@ async function processVideoOffline(
       { width: w, height: h },
     );
   }
-  if (!videoCodec) throw new Error("This browser has no supported video encoder");
+  if (!videoCodec)
+    throw new Error("This browser has no supported video encoder");
 
   // Audio: copy the original track when the container supports its codec so
   // timing and quality are untouched; otherwise transcode it.
@@ -2179,7 +2624,8 @@ async function processVideoOffline(
   await conversion.execute();
 
   const buffer = target.buffer;
-  if (!buffer || !buffer.byteLength) throw new Error("Video encoding produced no data");
+  if (!buffer || !buffer.byteLength)
+    throw new Error("Video encoding produced no data");
   if (onProgress) onProgress(100);
 
   const type = format === mp4 ? "video/mp4" : "video/webm";
@@ -2203,7 +2649,10 @@ async function processVideoRealtime(
   video.src = videoUrl;
 
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Video load timeout")), 30000);
+    const timer = setTimeout(
+      () => reject(new Error("Video load timeout")),
+      30000,
+    );
     video.onloadedmetadata = () => {
       clearTimeout(timer);
       resolve();
@@ -2227,7 +2676,9 @@ async function processVideoRealtime(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
 
-  const plan = maskDataUrl ? await buildInpaintPlan(maskDataUrl, w, h, 60) : null;
+  const plan = maskDataUrl
+    ? await buildInpaintPlan(maskDataUrl, w, h, 180)
+    : null;
   const filter = buildEnhanceFilter(presetName, ctrl);
 
   // Capture every drawn frame so the recording matches the source cadence.
@@ -2260,7 +2711,9 @@ async function processVideoRealtime(
     "video/webm",
   ];
   let mimeType = "";
-  let recorderOptions: Record<string, unknown> = { videoBitsPerSecond: 8000000 };
+  let recorderOptions: Record<string, unknown> = {
+    videoBitsPerSecond: 8000000,
+  };
   for (const mt of mimeTypes) {
     if (MediaRecorder.isTypeSupported(mt)) {
       mimeType = mt;
@@ -2284,7 +2737,9 @@ async function processVideoRealtime(
     if (filter !== "none") ctx.filter = "none";
     if (plan) applyInpaintPlan(ctx, plan);
     if (onProgress && isFinite(video.duration) && video.duration > 0) {
-      onProgress(Math.min(99, Math.round((video.currentTime / video.duration) * 100)));
+      onProgress(
+        Math.min(99, Math.round((video.currentTime / video.duration) * 100)),
+      );
     }
   };
 
@@ -2351,7 +2806,9 @@ async function processVideoRealtime(
   }
   if (onProgress) onProgress(100);
 
-  const mimeBase = mimeType.startsWith("video/webm") ? "video/webm" : "video/mp4";
+  const mimeBase = mimeType.startsWith("video/webm")
+    ? "video/webm"
+    : "video/mp4";
   const blob = new Blob(chunks, { type: mimeBase });
   if (!blob.size) throw new Error("Video encoding produced no data");
   return blob;
@@ -2365,7 +2822,12 @@ export function canvasToBlob(
     canvas.toBlob(
       (blob) => {
         if (blob) resolve(blob);
-        else reject(new Error("Could not encode the result — the image may be too large"));
+        else
+          reject(
+            new Error(
+              "Could not encode the result — the image may be too large",
+            ),
+          );
       },
       format || "image/png",
       0.95,

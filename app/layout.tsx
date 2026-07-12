@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -12,7 +13,6 @@ export const metadata: Metadata = {
     "background remover",
     "image enhancer",
     "video enhancer",
-    "AI watermark removal",
     "image deblur",
     "video upscaler",
     "4K video enhancer",
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     url: "https://sharpixa.com/",
     title: "Sharpixa — Remove Watermarks, Backgrounds & Enhance Images & Videos Free Online",
     description:
-      "Remove watermarks, logos, text, and objects from images and videos online free. AI-powered background removal and enhancement with no signup required.",
+      "Remove watermarks, logos, text, and objects from images and videos online free. Background removal and enhancement with no signup required.",
     siteName: "Sharpixa",
   },
   twitter: {
@@ -50,7 +50,7 @@ export default function RootLayout({
     name: "Sharpixa",
     url: "https://sharpixa.com",
     description:
-      "Free online watermark removal, background removal, and image/video enhancement tool. Remove logos, text, and objects with AI-powered technology.",
+      "Free online watermark removal, background removal, and image/video enhancement tool. Remove logos, text, and objects with powerful in-browser processing.",
     applicationCategory: "MultimediaApplication",
     operatingSystem: "Web",
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
@@ -109,8 +109,14 @@ export default function RootLayout({
   };
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en">
       <head>
+        <Script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3890435207453108"
+          crossOrigin="anonymous"
+          strategy="afterInteractive"
+        />
         <link rel="icon" href="/sharpixa-logo.png" />
         <link rel="apple-touch-icon" href="/sharpixa-logo.png" />
         <script
@@ -120,11 +126,6 @@ export default function RootLayout({
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdFaq) }}
-        />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `document.documentElement.classList.toggle('dark', window.matchMedia('(prefers-color-scheme: dark)').matches)`,
-          }}
         />
       </head>
       <body className="min-h-dvh text-sm antialiased">

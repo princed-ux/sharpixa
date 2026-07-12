@@ -11,7 +11,7 @@ html {
 }
 
 body {
-  @apply bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100;
+  @apply bg-white text-gray-900;
 }
 
 /* Glassmorphism */
@@ -21,13 +21,6 @@ body {
   -webkit-backdrop-filter: blur(16px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
-.dark .glass {
-  background: rgba(17, 24, 39, 0.65);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border: 1px solid rgba(55, 65, 81, 0.4);
-}
-
 /* Gradient text */
 .gradient-text {
   background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
@@ -44,14 +37,6 @@ body {
     radial-gradient(at 80% 10%, rgba(168, 85, 247, 0.1) 0px, transparent 50%),
     radial-gradient(at 50% 80%, rgba(236, 72, 153, 0.08) 0px, transparent 50%);
 }
-.dark .mesh-bg {
-  background-color: #030712;
-  background-image:
-    radial-gradient(at 20% 20%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
-    radial-gradient(at 80% 10%, rgba(168, 85, 247, 0.12) 0px, transparent 50%),
-    radial-gradient(at 50% 80%, rgba(236, 72, 153, 0.1) 0px, transparent 50%);
-}
-
 /* Premium button */
 .btn-primary {
   @apply inline-flex items-center gap-2 font-semibold rounded-xl px-7 py-3 text-white transition-all duration-300;
@@ -80,39 +65,21 @@ body {
   border-color: rgba(99, 102, 241, 0.2);
   cursor: pointer;
 }
-.dark .btn-secondary {
-  background: rgba(99, 102, 241, 0.12);
-  color: #a5b4fc;
-  border-color: rgba(99, 102, 241, 0.3);
-}
 .btn-secondary:hover {
   background: rgba(99, 102, 241, 0.15);
   transform: translateY(-1px);
 }
-.dark .btn-secondary:hover {
-  background: rgba(99, 102, 241, 0.2);
-}
-
 /* Premium card */
 .premium-card {
   @apply rounded-2xl p-6 transition-all duration-300 border;
   border-color: rgba(229, 231, 235, 0.8);
   background: white;
 }
-.dark .premium-card {
-  border-color: rgba(55, 65, 81, 0.6);
-  background: rgba(17, 24, 39, 0.5);
-}
 .premium-card:hover {
   transform: translateY(-4px);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
   border-color: rgba(99, 102, 241, 0.3);
 }
-.dark .premium-card:hover {
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-  border-color: rgba(99, 102, 241, 0.4);
-}
-
 /* Feature icon */
 .feature-icon {
   @apply w-12 h-12 rounded-xl flex items-center justify-center text-2xl mb-4;
@@ -278,10 +245,6 @@ body {
   @apply py-3.5 px-5 rounded-xl border-2 bg-white cursor-pointer transition-all text-center font-medium;
   border-color: rgba(229, 231, 235, 1);
 }
-.dark .preset-btn {
-  border-color: rgba(55, 65, 81, 1);
-  background: rgba(17, 24, 39, 0.5);
-}
 .preset-btn:hover {
   border-color: rgba(99, 102, 241, 0.4);
 }
@@ -290,19 +253,10 @@ body {
   background: rgba(99, 102, 241, 0.08);
   color: #6366f1;
 }
-.dark .preset-btn.active {
-  border-color: #818cf8;
-  background: rgba(99, 102, 241, 0.15);
-  color: #a5b4fc;
-}
 
 .res-btn {
   @apply py-2.5 px-4 rounded-xl border bg-white cursor-pointer transition-all text-sm font-medium;
   border-color: rgba(229, 231, 235, 1);
-}
-.dark .res-btn {
-  border-color: rgba(55, 65, 81, 1);
-  background: rgba(17, 24, 39, 0.5);
 }
 .res-btn:hover {
   border-color: rgba(99, 102, 241, 0.4);
@@ -312,20 +266,12 @@ body {
   background: rgba(99, 102, 241, 0.08);
   color: #6366f1;
 }
-.dark .res-btn.active {
-  border-color: #818cf8;
-  background: rgba(99, 102, 241, 0.15);
-  color: #a5b4fc;
-}
 
 /* Tab buttons */
 .tab-btn {
   @apply py-2.5 px-5 rounded-xl font-semibold text-sm transition-all cursor-pointer border-none;
   background: transparent;
   color: #6b7280;
-}
-.dark .tab-btn {
-  color: #9ca3af;
 }
 .tab-btn.active {
   background: linear-gradient(135deg, #6366f1, #a855f7);
@@ -339,27 +285,16 @@ body {
   border-color: rgba(156, 163, 175, 0.3);
   background: rgba(243, 244, 246, 0.3);
 }
-.dark .ad-slot {
-  background: rgba(31, 41, 55, 0.3);
-  border-color: rgba(75, 85, 99, 0.3);
-}
-
 /* FAQ */
 .faq-item {
   @apply border-b;
   border-color: rgba(229, 231, 235, 0.8);
-}
-.dark .faq-item {
-  border-color: rgba(55, 65, 81, 0.6);
 }
 .faq-question {
   @apply py-5 cursor-pointer flex justify-between items-center font-semibold text-base transition-colors;
 }
 .faq-question:hover {
   color: #6366f1;
-}
-.dark .faq-question:hover {
-  color: #a5b4fc;
 }
 .faq-answer {
   max-height: 0;
@@ -368,9 +303,6 @@ body {
     max-height 0.3s ease,
     padding 0.3s ease;
   @apply text-gray-500 text-sm leading-relaxed;
-}
-.dark .faq-answer {
-  @apply text-gray-400;
 }
 .faq-answer.open {
   max-height: 200px;
@@ -429,27 +361,15 @@ input[type="range"]::-moz-range-thumb {
 .nav-link {
   @apply font-medium text-sm text-gray-500 cursor-pointer transition-colors;
 }
-.dark .nav-link {
-  @apply text-gray-400;
-}
 .nav-link:hover {
   color: #6366f1;
 }
-.dark .nav-link:hover {
-  color: #a5b4fc;
-}
-
 /* Badge */
 .badge {
   @apply inline-flex items-center gap-1.5 py-1 px-2.5 rounded-full text-xs font-semibold;
   background: rgba(34, 197, 94, 0.1);
   color: #16a34a;
 }
-.dark .badge {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-}
-
 /* Checkerboard pattern for transparency */
 .bg-checkerboard {
   background-image:
@@ -460,25 +380,11 @@ input[type="range"]::-moz-range-thumb {
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
-.dark .bg-checkerboard {
-  background-image:
-    linear-gradient(45deg, #444 25%, transparent 25%),
-    linear-gradient(-45deg, #444 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #444 75%),
-    linear-gradient(-45deg, transparent 75%, #444 75%);
-  background-size: 16px 16px;
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
-}
-
 /* Result preview */
 .result-preview {
   @apply rounded-xl overflow-hidden border;
   border-color: rgba(229, 231, 235, 0.8);
 }
-.dark .result-preview {
-  border-color: rgba(55, 65, 81, 0.6);
-}
-
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
@@ -489,9 +395,6 @@ input[type="range"]::-moz-range-thumb {
 ::-webkit-scrollbar-thumb {
   background: rgba(156, 163, 175, 0.3);
   border-radius: 999px;
-}
-.dark ::-webkit-scrollbar-thumb {
-  background: rgba(75, 85, 99, 0.4);
 }
 
 /* Container */
