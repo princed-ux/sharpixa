@@ -464,10 +464,9 @@ export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
  </button>
  <button className="btn-secondary text-base px-6 py-3" onClick={reset}>Process Another File</button>
  </div>
- </div>
- <div className="ad-slot mt-6">Advertisement — Google AdSense (Results page native ad)</div>
- </div>
- );
+  </div>
+  </div>
+  );
  }
 
  // ---- BRUSH VIEW (watermark / background modes) ----

@@ -24,19 +24,9 @@ export default function RemoveWatermark() {
   <HowItWorks />
  <BeforeAfter />
  <FeaturesGrid />
- <FileTypes />
+  <FileTypes />
 
- {/* Google AdSense */}
- <div className="container-x section">
- <div className="ad-slot">Advertisement — Google AdSense (728×90 leaderboard)</div>
- </div>
-
- <FAQ />
-
-  {/* Google AdSense (Bottom) */}
- <div className="container-x section pt-0">
- <div className="ad-slot">Advertisement — Google AdSense (728×90 bottom)</div>
- </div>
+  <FAQ />
 
  <Footer />
  </>

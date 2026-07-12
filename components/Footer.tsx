@@ -33,9 +33,8 @@ export default function Footer() {
  <a className="nav-link" onClick={() => scrollTo("faq")}>FAQ</a>
  </div>
  </div>
- </div>
- <div className="ad-slot mb-6">Advertisement — Google AdSense (Footer 728×90)</div>
- <div className="border-t border-gray-200 pt-6 text-center text-sm text-gray-400">
+  </div>
+  <div className="border-t border-gray-200 pt-6 text-center text-sm text-gray-400">
  <p>&copy; 2026 Sharpixa. All rights reserved.</p>
  <p className="mt-1 text-xs">Processing happens entirely in your browser. Nothing is uploaded to any server.</p>
  </div>

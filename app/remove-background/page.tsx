@@ -24,17 +24,9 @@ export default function RemoveBackground() {
   <HowItWorks />
  <BeforeAfter />
  <FeaturesGrid />
- <FileTypes />
+  <FileTypes />
 
- <div className="container-x section">
- <div className="ad-slot">Advertisement — Google AdSense (728×90 leaderboard)</div>
- </div>
-
- <FAQ />
-
-  <div className="container-x section pt-0">
- <div className="ad-slot">Advertisement — Google AdSense (728×90 bottom)</div>
- </div>
+  <FAQ />
 
  <Footer />
  </>
