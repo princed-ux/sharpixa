@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "postbuild": "node -e \"require('fs').writeFileSync('out/.nojekyll', '')\"",
+    "postbuild": "node -e \"const fs=require('fs');fs.writeFileSync('out/.nojekyll','');if(fs.existsSync('out/404/index.html')){fs.copyFileSync('out/404/index.html','out/404.html')}\"",
     "start": "next start",
     "lint": "next lint"
   },
