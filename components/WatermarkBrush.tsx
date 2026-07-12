@@ -313,7 +313,7 @@ export default function WatermarkBrush({ imageUrl, videoUrl, onMaskChange }: Pro
  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
  brushTool === t.id
  ? "bg-white shadow-sm text-indigo-600"
- : "text-gray-500 hover:text-gray-700:text-gray-300"
+  : "text-gray-500 hover:text-gray-700"
  }`}
  onClick={() => setBrushTool(t.id)}
  >
@@ -343,7 +343,7 @@ export default function WatermarkBrush({ imageUrl, videoUrl, onMaskChange }: Pro
  <button
  className={`flex items-center justify-center w-7 h-7 rounded-lg transition-all ${
  canUndo
- ? "bg-gray-100 text-gray-600 hover:bg-gray-200:bg-gray-700"
+ ? "bg-gray-100 text-gray-600 hover:bg-gray-200"
  : "text-gray-300 cursor-not-allowed"
  }`}
  onClick={undo}
@@ -359,7 +359,7 @@ export default function WatermarkBrush({ imageUrl, videoUrl, onMaskChange }: Pro
  <button
  className={`flex items-center justify-center w-7 h-7 rounded-lg transition-all ${
  canRedo
- ? "bg-gray-100 text-gray-600 hover:bg-gray-200:bg-gray-700"
+ ? "bg-gray-100 text-gray-600 hover:bg-gray-200"
  : "text-gray-300 cursor-not-allowed"
  }`}
  onClick={redo}
@@ -373,7 +373,7 @@ export default function WatermarkBrush({ imageUrl, videoUrl, onMaskChange }: Pro
 
  {/* Clear */}
  <button
- className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-50 text-red-500 hover:bg-red-100:bg-red-950/50 transition-all"
+  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-all"
  onClick={clearMask}
  >
  Clear

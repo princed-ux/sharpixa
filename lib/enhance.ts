@@ -33,13 +33,12 @@ function sharpenKernel(
 ): Uint8ClampedArray<ArrayBuffer> {
   const out = new Uint8ClampedArray(data);
   const k = amount;
-  // Overshoot beyond this is clipped so edges get crisper without the bright
-  // halos that make results look artificially "sharpie".
-  const HALO_LIMIT = 40;
-  // Sharpening only kicks in on real edges; flat and noisy areas are left
-  // alone so grain never gets amplified.
-  const EDGE_LO = 10;
-  const EDGE_HI = 26;
+  // When amount is high, lower thresholds so blurry edges get caught too.
+  // At amount=1.5 (max): EDGE_LO≈3, EDGE_HI≈10 → catches even soft edges.
+  // At amount=0.15 (light): EDGE_LO≈10, EDGE_HI≈26 → only crisp edges.
+  const EDGE_LO = Math.max(2, 10 - k * 6);
+  const EDGE_HI = Math.max(5, 26 - k * 12);
+  const HALO_LIMIT = 30 + k * 20;
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
       const idx = (y * w + x) * 4;

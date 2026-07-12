@@ -22,7 +22,7 @@ export default function Navbar() {
  setMobileOpen(false);
  }, []);
 
- const isActive = (path: string) => pathname === path;
+  const isActive = (path: string) => pathname === path || pathname === path + "/";
 
  const modeLinks = [
  { label: "Remove Watermark", path: "/remove-watermark", icon: "eraser" as const },
@@ -55,7 +55,7 @@ export default function Navbar() {
  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all relative ${
  isActive(link.path)
  ? "bg-indigo-500/10 text-indigo-600 shadow-sm"
- : "text-gray-600 hover:bg-gray-100:bg-gray-800"
+  : "text-gray-600 hover:bg-gray-100"
  }`}
  style={isActive(link.path) ? { boxShadow: "inset 0 -2px 0 #6366f1" } : undefined}
  >
@@ -108,7 +108,7 @@ export default function Navbar() {
  className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
  isActive(link.path)
  ? "bg-indigo-500/10 text-indigo-600"
- : "text-gray-700 hover:bg-gray-100:bg-gray-800"
+  : "text-gray-700 hover:bg-gray-100"
  }`}
  >
  <Icon name={link.icon} size={16} />
@@ -119,7 +119,7 @@ export default function Navbar() {
  {sectionLinks.map((link) => (
  <button
  key={link.id}
- className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-gray-700 hover:bg-gray-100:bg-gray-800 transition-all"
+  className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-gray-700 hover:bg-gray-100 transition-all"
  onClick={() => scrollTo(link.id)}
  >
  {link.label}
