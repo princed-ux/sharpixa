@@ -13,15 +13,16 @@ import {
  type AdvancedControls,
 } from "@/lib/constants";
 import {
- enhanceImage,
- processVideo,
- canvasToBlob,
- formatBytes,
- generateSampleImage,
- removeBackgroundFromImage,
- autoRemoveBackgroundFromImage,
- removeWatermarkFromImage,
- captureVideoFrame,
+  enhanceImage,
+  processVideo,
+  canvasToBlob,
+  formatBytes,
+  generateSampleImage,
+  removeBackgroundFromImage,
+  autoRemoveBackgroundFromImage,
+  removeWatermarkFromImage,
+  captureVideoFrame,
+  clearMaskCache,
 } from "@/lib/enhance";
 
 
@@ -49,12 +50,14 @@ export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
  const [controls, setControls] = useState<AdvancedControls>(DEFAULT_CONTROLS);
  const [dragover, setDragover] = useState(false);
  const [autoMode, setAutoMode] = useState(true);
+ const [outputDims, setOutputDims] = useState<{ w: number; h: number } | null>(null);
  const fileInputRef = useRef<HTMLInputElement>(null);
 
  const limits = FILE_LIMITS;
 
- const handleFile = useCallback((f: File) => {
- const ext = (f.name.split(".").pop() || "").toLowerCase();
+  const handleFile = useCallback((f: File) => {
+  clearMaskCache();
+  const ext = (f.name.split(".").pop() || "").toLowerCase();
  const isImage = IMAGE_FORMATS.includes(ext as any) || f.type.startsWith("image/");
  const isVideo = VIDEO_FORMATS.includes(ext as any) || f.type.startsWith("video/");
 
@@ -83,14 +86,15 @@ export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
   setControls(DEFAULT_CONTROLS);
   setPreset("standard");
   setResolution("original");
- if (fileURL) URL.revokeObjectURL(fileURL);
- const url = URL.createObjectURL(f);
- setFileURL(url);
- setEnhancedURL(null);
- setEnhancedBlob(null);
- setProgress(0);
+  setOutputDims(null);
+  if (fileURL) URL.revokeObjectURL(fileURL);
+  const url = URL.createObjectURL(f);
+  setFileURL(url);
+  setEnhancedURL(null);
+  setEnhancedBlob(null);
+  setProgress(0);
 
- if (mode === "background" && autoMode) {
+  if (mode === "background" && autoMode) {
  processBackgroundImage(f, url);
  return;
  }
@@ -100,7 +104,7 @@ export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
  .then(setPosterURL)
  .catch(() => setError("Could not read the first video frame. Try a different file."));
  }
- }, [fileURL, mode, limits]);
+ }, [fileURL, mode, limits, autoMode]);
 
  const onDrop = useCallback((e: React.DragEvent) => {
  e.preventDefault();
@@ -117,20 +121,21 @@ export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
  handleFile(sample);
  };
 
- const reset = () => {
- if (fileURL) URL.revokeObjectURL(fileURL);
- if (enhancedURL && enhancedURL.startsWith("blob:")) URL.revokeObjectURL(enhancedURL);
- if (fileInputRef.current) fileInputRef.current.value = "";
- setFile(null);
- setFileURL(null);
- setPosterURL(null);
- setEnhancedURL(null);
- setEnhancedBlob(null);
- setMaskDataUrl(null);
- setProgress(0);
- setError(null);
- setPhase("upload");
- };
+  const reset = () => {
+  clearMaskCache();
+  if (fileURL) URL.revokeObjectURL(fileURL);
+  if (enhancedURL && enhancedURL.startsWith("blob:")) URL.revokeObjectURL(enhancedURL);
+  if (fileInputRef.current) fileInputRef.current.value = "";
+  setFile(null);
+  setFileURL(null);
+  setPosterURL(null);
+  setEnhancedURL(null);
+  setEnhancedBlob(null);
+  setMaskDataUrl(null);
+  setProgress(0);
+  setError(null);
+  setPhase("upload");
+  };
 
  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  const yieldToPaint = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
@@ -155,7 +160,11 @@ export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
 
  const canvas = await autoRemoveBackgroundFromImage(img);
  setProgress(70);
- await sleep(150);
+ for (let p = 72; p < 90; p += 1 + Math.random() * 2) {
+  await new Promise((r) => setTimeout(r, 20));
+  setProgress(Math.min(89, Math.round(p)));
+ }
+ await sleep(50);
  const blob = await canvasToBlob(canvas, "image/png");
  setEnhancedBlob(blob);
  setEnhancedURL(URL.createObjectURL(blob));
@@ -199,8 +208,14 @@ export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
  ? await removeWatermarkFromImage(img, maskDataUrl)
  : await enhanceImage(img, preset, resolution, controls, maskDataUrl);
 
+ setOutputDims({ w: canvas.width, h: canvas.height });
  setProgress(70);
- await sleep(200);
+ // Smooth fill so progress doesn't feel stagnant after the 35→70 jump
+ for (let p = 72; p < 90; p += 1 + Math.random() * 2) {
+  await new Promise((r) => setTimeout(r, 20));
+  setProgress(Math.min(89, Math.round(p)));
+ }
+ await sleep(50);
 
  const fmt = mode === "background"
  ? "image/png"
@@ -401,13 +416,13 @@ export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
  );
  }
 
- // ---- RESULT VIEW ----
- if (phase === "result" && enhancedURL) {
- return (
- <div className="max-w-4xl mx-auto animate-fade-in">
- <div className="glass rounded-2xl p-6 md:p-8">
- <div className="text-center mb-6">
- <div className="success-checkmark mb-4">
+// ---- RESULT VIEW ----
+  if (phase === "result" && enhancedURL) {
+  return (
+  <div className="max-w-4xl mx-auto animate-fade-in">
+  <div className={`rounded-2xl p-6 md:p-8 ${mode !== "background" ? "glass" : ""}`}>
+  <div className="text-center mb-6">
+  <div className="success-checkmark mb-4">
  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
  <path d="M20 6L9 17l-5-5" />
  </svg>
@@ -436,26 +451,26 @@ export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
  </div>
  ) : (
  // Background / Enhance: draggable slider
- <div className={`mb-6 ${mode === "background" ? "bg-checkerboard rounded-xl" : ""}`}>
- <CompareSlider
- beforeUrl={fileURL || ""}
- afterUrl={enhancedURL}
- mode={mode}
- />
- </div>
+  <div className="mb-6">
+  <CompareSlider
+  beforeUrl={fileURL || ""}
+  afterUrl={enhancedURL}
+  mode={mode}
+  />
+  </div>
  )
  ) : (
  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
  <div>
  <p className="text-sm font-semibold mb-2 text-gray-500">Before</p>
  <div className="result-preview p-2">
- <video src={fileURL || ""} controls className="rounded-lg w-full" />
- </div>
- </div>
- <div>
- <p className="text-sm font-semibold mb-2 text-indigo-500">After</p>
- <div className="result-preview p-2">
- <video src={enhancedURL} controls className="rounded-lg w-full" />
+  <video src={fileURL || ""} className="rounded-lg w-full" disablePictureInPicture onContextMenu={(e) => e.preventDefault()} />
+  </div>
+  </div>
+  <div>
+  <p className="text-sm font-semibold mb-2 text-indigo-500">After</p>
+  <div className="result-preview p-2">
+  <video src={enhancedURL} controls controlsList="nodownload" disablePictureInPicture onContextMenu={(e) => e.preventDefault()} className="rounded-lg w-full" />
  </div>
  </div>
   </div>
@@ -463,7 +478,7 @@ export default function UploadZone({ mode: initialMode }: { mode: Mode }) {
 
   {mode === "enhance" && (
   <p className="text-xs text-center text-gray-400 mb-4">
-  Output: {resolution === "original" ? "Original resolution" : `${resLabel[resolution]} – ${resolution === "8k" ? "7680×4320" : resolution === "4x" ? "up to 4096px" : "up to 2048px"}`}
+  Output: {resolution === "original" ? "Original resolution" : `${resLabel[resolution]}${outputDims ? ` (${outputDims.w}×${outputDims.h})` : ""}`}
   </p>
   )}
 

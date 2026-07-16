@@ -16,6 +16,10 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
 // Videos re-decode the same mask for every frame — cache the decoded image.
 const maskImageCache = new Map<string, HTMLImageElement>();
 
+export function clearMaskCache(): void {
+  maskImageCache.clear();
+}
+
 async function loadMaskImage(maskDataUrl: string): Promise<HTMLImageElement> {
   const cached = maskImageCache.get(maskDataUrl);
   if (cached) return cached;
@@ -34,10 +38,10 @@ function sharpenKernel(
   const out = new Uint8ClampedArray(data);
   const k = amount;
   // When amount is high, lower thresholds so blurry edges get caught too.
-  // At amount=1.5 (max): EDGE_LO≈3, EDGE_HI≈10 → catches even soft edges.
-  // At amount=0.15 (light): EDGE_LO≈10, EDGE_HI≈26 → only crisp edges.
-  const EDGE_LO = Math.max(2, 10 - k * 6);
-  const EDGE_HI = Math.max(5, 26 - k * 12);
+  // At amount=1.5: EDGE_LO≈0.75, EDGE_HI=2.5 → catches even very soft edges.
+  // At amount=0.15 (light): EDGE_LO≈5.5, EDGE_HI≈14.5 → only crisp edges.
+  const EDGE_LO = Math.max(0.75, 6 - k * 3.5);
+  const EDGE_HI = Math.max(2.5, 16 - k * 9);
   const HALO_LIMIT = 30 + k * 20;
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
@@ -165,7 +169,9 @@ export async function enhanceImage(
   const brightness = p.brightness + controls.brightness;
   const contrast = p.contrast + controls.contrast;
   const saturation = p.saturation + controls.saturation;
-  const sharpness = p.sharpness + controls.sharpness / 100;
+  // /60 gives the slider a much stronger effect — at 100 it adds ~1.67
+  // instead of ~1.0, letting users sharpen very blurry photos.
+  const sharpness = p.sharpness + controls.sharpness / 60;
   const denoise = p.denoise;
 
   let w = img.naturalWidth || img.width;
@@ -275,6 +281,7 @@ interface InpaintPlan {
   coarseVal: Float32Array; // cw*ch*3 solution buffer
   coarseSum: Float32Array;
   coarseCnt: Int32Array;
+  coarseValCache: Float32Array | null; // cached coarse field from a static frame
   // Patch-copy fill, computed from the first frame's content and then fixed
   // so every video frame uses the identical mapping:
   offsets: Int32Array | null; // per-target box index of the copied source px
@@ -308,9 +315,9 @@ export const __inpaintDbg = {
   noEdgeBlur: false,
 };
 
-const MASK_DILATE = 5;
+const MASK_DILATE = 9;
 const MASK_ALPHA_THRESHOLD = 16;
-const BOX_MARGIN = 48;
+const BOX_MARGIN = 60;
 const TEXTURE_STRENGTH = 0.95;
 const TEXTURE_CLAMP = 36;
 // Below this many masked pixels the diffusion fill is already invisible and
@@ -568,7 +575,7 @@ async function buildInpaintPlan(
     bilinearSetup(sx, sy, cs, cw, ch, mirrorCells, mirrorW, i * 4);
   }
 
-  // Feathered seam: pixels within 2px of the mask boundary, inside and out.
+  // Feathered seam: pixels within 3px of the mask boundary, inside and out.
   // The outside half doubles as the motion-watch rim: real pixels whose
   // change signals that the scene moved under the mask.
   const blurList: number[] = [];
@@ -579,10 +586,10 @@ async function buildInpaintPlan(
       const i = yy * bw + xx;
       const inside = boxMask[i] === 1;
       let nearOpposite = false;
-      for (let dy = -2; dy <= 2 && !nearOpposite; dy++) {
+      for (let dy = -3; dy <= 3 && !nearOpposite; dy++) {
         const ny = yy + dy;
         if (ny < 0 || ny >= bh) continue;
-        for (let dx = -2; dx <= 2; dx++) {
+        for (let dx = -3; dx <= 3; dx++) {
           const nx = xx + dx;
           if (nx < 0 || nx >= bw) continue;
           if ((boxMask[ny * bw + nx] === 1) !== inside) {
@@ -593,7 +600,7 @@ async function buildInpaintPlan(
       }
       if (nearOpposite) {
         blurList.push(i);
-        blendList.push(inside ? 0.2 : 0.1);
+        blendList.push(inside ? 0.3 : 0.2);
         if (!inside) rimList.push(i);
       }
     }
@@ -624,6 +631,7 @@ async function buildInpaintPlan(
     scratch: new Uint8ClampedArray(bw * bh * 4),
     tScratch: new Float32Array(t * 3),
     coarseVal: new Float32Array(cw * ch * 3),
+    coarseValCache: null,
     coarseSum: new Float32Array(cw * ch * 3),
     coarseCnt: new Int32Array(cw * ch),
     offsets: null,
@@ -1444,33 +1452,39 @@ function removeAshWatermark(
   mirror: Int32Array,
   t: number,
 ): boolean {
+  // Track which pixels are actually lighter than their mirror.
+  const affected = new Uint8Array(t);
   let sumDr = 0,
     sumDg = 0,
     sumDb = 0,
     n = 0;
-  let posLum = 0;
+  let aboveCount = 0;
 
   for (let i = 0; i < t; i++) {
     const m = mirror[i];
     if (m < 0) continue;
     const di = targets[i] * 4;
     const mi = m * 4;
-    const dr = px[di] - px[mi];
-    const dg = px[di + 1] - px[mi + 1];
-    const db = px[di + 2] - px[mi + 2];
-    sumDr += dr;
-    sumDg += dg;
-    sumDb += db;
     const lIn = px[di] * 0.299 + px[di + 1] * 0.587 + px[di + 2] * 0.114;
     const lOut = px[mi] * 0.299 + px[mi + 1] * 0.587 + px[mi + 2] * 0.114;
-    if (lIn > lOut) posLum++;
-    n++;
+    if (lIn > lOut) aboveCount++;
+    // Only count pixels that are clearly lighter (ash overlay present).
+    if (lIn > lOut + 3) {
+      const dr = px[di] - px[mi];
+      const dg = px[di + 1] - px[mi + 1];
+      const db = px[di + 2] - px[mi + 2];
+      sumDr += dr;
+      sumDg += dg;
+      sumDb += db;
+      affected[i] = 1;
+      n++;
+    }
   }
 
-  if (n < 20) return false;
+  if (n < 10) return false;
 
   // Ash watermarks are light-colored — most masked pixels should be lighter
-  const lightRatio = posLum / n;
+  const lightRatio = aboveCount / Math.max(1, t);
   if (lightRatio < 0.55) return false;
 
   const avgDr = sumDr / n;
@@ -1480,7 +1494,9 @@ function removeAshWatermark(
 
   if (avgLumShift < 3) return false;
 
+  // Only correct pixels that showed clear evidence of ash overlay.
   for (let i = 0; i < t; i++) {
+    if (!affected[i]) continue;
     const di = targets[i] * 4;
     px[di] = clamp(px[di] - avgDr);
     px[di + 1] = clamp(px[di + 1] - avgDg);
@@ -1490,7 +1506,11 @@ function removeAshWatermark(
   return true;
 }
 
-function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
+function applyInpaintPlan(
+  ctx: Ctx2D,
+  plan: InpaintPlan,
+  skipAsh?: boolean,
+): void {
   const {
     bx,
     by,
@@ -1522,82 +1542,111 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
   const px = imageData.data;
   const t = targets.length;
 
-  // Stage 0: detect and remove semi-transparent "ash" watermark overlay.
-  // This preserves the original pixels under light-colored watermarks,
-  // keeping detail (hair, edges, texture) that inpainting would replace.
-  removeAshWatermark(px, targets, mirror, t);
+  // ---- Early rim drift check (read-only, before any modifications) ----
+  // Measures how much the unmasked pixels hugging the mask have changed
+  // since the last reference frame. A static scene (drift <= 3) lets us
+  // reuse the cached coarse field, skipping the expensive Gauss-Seidel
+  // diffusion on every frame.
+  const rim = plan.rimIdx;
+  let rimDrift = -1;
+  if (plan.offsets && plan.rimRef && rim.length > 0) {
+    rimDrift = 0;
+    for (let j = 0; j < rim.length; j++) {
+      const si = rim[j] * 4;
+      const lum = px[si] * 0.299 + px[si + 1] * 0.587 + px[si + 2] * 0.114;
+      const d = lum - plan.rimRef[j];
+      rimDrift += d < 0 ? -d : d;
+    }
+    rimDrift /= rim.length;
+  }
+  const sceneUnchanged = rimDrift >= 0 && rimDrift <= 3;
 
-  // Stage 1: coarse color field. Average the unmasked pixels of each cell,
-  // then diffuse into the masked cells.
-  coarseSum.fill(0);
-  coarseCnt.fill(0);
-  for (let yy = 0; yy < bh; yy++) {
-    const cy = (yy / cs) | 0;
-    for (let xx = 0; xx < bw; xx++) {
-      const i = yy * bw + xx;
-      if (boxMask[i]) continue;
-      const cell = cy * cw + ((xx / cs) | 0);
-      const si = i * 4;
-      coarseSum[cell * 3] += px[si];
-      coarseSum[cell * 3 + 1] += px[si + 1];
-      coarseSum[cell * 3 + 2] += px[si + 2];
-      coarseCnt[cell]++;
+  // Stage 0: detect and remove semi-transparent "ash" watermark overlay.
+  // OK to skip for video — watermarks are almost always opaque logos.
+  if (!skipAsh) removeAshWatermark(px, targets, mirror, t);
+
+  // Stage 1: coarse color field.
+  // For video with a static scene, reuse the cached field from the previous
+  // frame instead of recomputing from scratch — the Gauss-Seidel diffusion
+  // is the single most expensive per-frame operation for large masks.
+  if (sceneUnchanged && plan.coarseValCache) {
+    coarseVal.set(plan.coarseValCache);
+  } else {
+    coarseSum.fill(0);
+    coarseCnt.fill(0);
+    for (let yy = 0; yy < bh; yy++) {
+      const cy = (yy / cs) | 0;
+      for (let xx = 0; xx < bw; xx++) {
+        const i = yy * bw + xx;
+        if (boxMask[i]) continue;
+        const cell = cy * cw + ((xx / cs) | 0);
+        const si = i * 4;
+        coarseSum[cell * 3] += px[si];
+        coarseSum[cell * 3 + 1] += px[si + 1];
+        coarseSum[cell * 3 + 2] += px[si + 2];
+        coarseCnt[cell]++;
+      }
     }
-  }
-  let mr = 0,
-    mg = 0,
-    mb2 = 0,
-    mn = 0;
-  for (let c = 0; c < cw * ch; c++) {
-    if (coarseCnt[c] > 0) {
-      coarseVal[c * 3] = coarseSum[c * 3] / coarseCnt[c];
-      coarseVal[c * 3 + 1] = coarseSum[c * 3 + 1] / coarseCnt[c];
-      coarseVal[c * 3 + 2] = coarseSum[c * 3 + 2] / coarseCnt[c];
-      mr += coarseVal[c * 3];
-      mg += coarseVal[c * 3 + 1];
-      mb2 += coarseVal[c * 3 + 2];
-      mn++;
+    let mr = 0,
+      mg = 0,
+      mb2 = 0,
+      mn = 0;
+    for (let c = 0; c < cw * ch; c++) {
+      if (coarseCnt[c] > 0) {
+        coarseVal[c * 3] = coarseSum[c * 3] / coarseCnt[c];
+        coarseVal[c * 3 + 1] = coarseSum[c * 3 + 1] / coarseCnt[c];
+        coarseVal[c * 3 + 2] = coarseSum[c * 3 + 2] / coarseCnt[c];
+        mr += coarseVal[c * 3];
+        mg += coarseVal[c * 3 + 1];
+        mb2 += coarseVal[c * 3 + 2];
+        mn++;
+      }
     }
-  }
-  if (mn > 0) {
-    mr /= mn;
-    mg /= mn;
-    mb2 /= mn;
-  }
-  for (let c = 0; c < cw * ch; c++) {
-    if (!coarseKnown[c]) {
-      coarseVal[c * 3] = mr;
-      coarseVal[c * 3 + 1] = mg;
-      coarseVal[c * 3 + 2] = mb2;
+    if (mn > 0) {
+      mr /= mn;
+      mg /= mn;
+      mb2 /= mn;
     }
-  }
-  // Gauss-Seidel relaxation, alternating sweep direction.
-  for (let iter = 0; iter < coarseIters; iter++) {
-    const rev = iter & 1;
-    for (let s = 0; s < cw * ch; s++) {
-      const c = rev ? cw * ch - 1 - s : s;
-      if (coarseKnown[c]) continue;
-      const x = c % cw;
-      const y = (c - x) / cw;
-      const l = (x > 0 ? c - 1 : c) * 3;
-      const r = (x < cw - 1 ? c + 1 : c) * 3;
-      const u = (y > 0 ? c - cw : c) * 3;
-      const d = (y < ch - 1 ? c + cw : c) * 3;
-      coarseVal[c * 3] =
-        (coarseVal[l] + coarseVal[r] + coarseVal[u] + coarseVal[d]) * 0.25;
-      coarseVal[c * 3 + 1] =
-        (coarseVal[l + 1] +
-          coarseVal[r + 1] +
-          coarseVal[u + 1] +
-          coarseVal[d + 1]) *
-        0.25;
-      coarseVal[c * 3 + 2] =
-        (coarseVal[l + 2] +
-          coarseVal[r + 2] +
-          coarseVal[u + 2] +
-          coarseVal[d + 2]) *
-        0.25;
+    for (let c = 0; c < cw * ch; c++) {
+      if (!coarseKnown[c]) {
+        coarseVal[c * 3] = mr;
+        coarseVal[c * 3 + 1] = mg;
+        coarseVal[c * 3 + 2] = mb2;
+      }
     }
+    // Gauss-Seidel relaxation, alternating sweep direction.
+    for (let iter = 0; iter < coarseIters; iter++) {
+      const rev = iter & 1;
+      for (let s = 0; s < cw * ch; s++) {
+        const c = rev ? cw * ch - 1 - s : s;
+        if (coarseKnown[c]) continue;
+        const x = c % cw;
+        const y = (c - x) / cw;
+        const l = (x > 0 ? c - 1 : c) * 3;
+        const r = (x < cw - 1 ? c + 1 : c) * 3;
+        const u = (y > 0 ? c - cw : c) * 3;
+        const d = (y < ch - 1 ? c + cw : c) * 3;
+        coarseVal[c * 3] =
+          (coarseVal[l] + coarseVal[r] + coarseVal[u] + coarseVal[d]) * 0.25;
+        coarseVal[c * 3 + 1] =
+          (coarseVal[l + 1] +
+            coarseVal[r + 1] +
+            coarseVal[u + 1] +
+            coarseVal[d + 1]) *
+          0.25;
+        coarseVal[c * 3 + 2] =
+          (coarseVal[l + 2] +
+            coarseVal[r + 2] +
+            coarseVal[u + 2] +
+            coarseVal[d + 2]) *
+          0.25;
+      }
+    }
+
+    // Cache the computed coarse field for reuse on subsequent static frames.
+    if (!plan.coarseValCache)
+      plan.coarseValCache = new Float32Array(coarseVal.length);
+    plan.coarseValCache.set(coarseVal);
   }
 
   // Stage 2: upsample the coarse field into the masked pixels.
@@ -1700,12 +1749,9 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
     }
   };
 
-  // Motion watch: compare the real pixels hugging the mask against their
-  // state when the offsets were last computed. Small drift = the scene moved
-  // under the mask, so re-verify the copies on this frame; large drift = a
-  // scene change, so rebuild the mapping from scratch. A static scene skips
-  // both, keeping the fill bit-identical across frames.
-  const rim = plan.rimIdx;
+  // Motion watch: use the rim drift measured earlier to decide whether the
+  // scene moved under the mask. Large drift = scene change (rebuild mapping),
+  // small drift = refine offsets, no drift = reuse everything (static scene).
   const captureRim = (): void => {
     if (!plan.rimRef) plan.rimRef = new Float32Array(rim.length);
     for (let j = 0; j < rim.length; j++) {
@@ -1713,22 +1759,12 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
       plan.rimRef[j] = px[si] * 0.299 + px[si + 1] * 0.587 + px[si + 2] * 0.114;
     }
   };
-  if (plan.offsets && plan.rimRef && rim.length > 0) {
-    let drift = 0;
-    for (let j = 0; j < rim.length; j++) {
-      const si = rim[j] * 4;
-      const lum = px[si] * 0.299 + px[si + 1] * 0.587 + px[si + 2] * 0.114;
-      const d = lum - plan.rimRef[j];
-      drift += d < 0 ? -d : d;
-    }
-    drift /= rim.length;
-    if (drift > 26) {
-      plan.offsets = null;
-      plan.corrBase = null;
-    } else if (drift > 3) {
-      refinePatchOffsets(plan, px);
-      captureRim();
-    }
+  if (rimDrift > 26) {
+    plan.offsets = null;
+    plan.corrBase = null;
+  } else if (rimDrift > 3) {
+    refinePatchOffsets(plan, px);
+    captureRim();
   }
 
   if (!plan.offsets && !plan.offsetsFailed) {
@@ -1834,7 +1870,7 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
     }
   }
 
-  // Stage 5: feathered blur along the seam.
+  // Stage 5: feathered blur along the seam (7×7 box).
   scratch.set(px);
   for (
     let j = __inpaintDbg.noEdgeBlur ? blurPixels.length : 0;
@@ -1848,10 +1884,10 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
       g = 0,
       b = 0,
       n = 0;
-    const y0 = y - 2 < 0 ? 0 : y - 2;
-    const y1 = y + 2 > bh - 1 ? bh - 1 : y + 2;
-    const x0 = x - 2 < 0 ? 0 : x - 2;
-    const x1 = x + 2 > bw - 1 ? bw - 1 : x + 2;
+    const y0 = y - 3 < 0 ? 0 : y - 3;
+    const y1 = y + 3 > bh - 1 ? bh - 1 : y + 3;
+    const x0 = x - 3 < 0 ? 0 : x - 3;
+    const x1 = x + 3 > bw - 1 ? bw - 1 : x + 3;
     for (let ny = y0; ny <= y1; ny++) {
       for (let nx = x0; nx <= x1; nx++) {
         const si = (ny * bw + nx) * 4;
@@ -1884,8 +1920,9 @@ function applyInpaintPlan(ctx: Ctx2D, plan: InpaintPlan): void {
         scratch[(y * bw + x - 1) * 4 + c] +
         scratch[(y * bw + x + 1) * 4 + c];
       const blurred = sum * 0.25;
-      // 0.35 strength — subtle but enough to restore edge contrast
-      const sharpened = center + 0.35 * (center - blurred);
+      // 0.2 strength — subtle enough to avoid making the fill area look
+      // artificially crisp compared to surrounding content
+      const sharpened = center + 0.2 * (center - blurred);
       px[idx * 4 + c] = sharpened < 0 ? 0 : sharpened > 255 ? 255 : sharpened;
     }
   }
@@ -2276,9 +2313,20 @@ const bgModels = clusters.map((bg, ci) => {
     }
   }
 
-  // Holes (bg not reached from edge) → set to opaque fg
+  // Holes (bg not reached from edge) — only fill if they don't match the bg
+  // color model, so letter interiors (O, A, D, etc.) stay transparent.
   for (let i = 0; i < w * h; i++) {
-    if (bgBin[i] === 0) mask[i] = 255;
+    if (bgBin[i] !== 0) continue;
+    const pi = i * 4;
+    let bestD = Infinity;
+    for (const m of bgModels) {
+      const dr = Math.abs(px[pi] - m.r) / m.tolR;
+      const dg = Math.abs(px[pi + 1] - m.g) / m.tolG;
+      const db = Math.abs(px[pi + 2] - m.b) / m.tolB;
+      const d = Math.max(dr, dg, db);
+      if (d < bestD) bestD = d;
+    }
+    if (bestD > 1.6) mask[i] = 255;
   }
 
   // Remove speckles: isolated fg pixels surrounded by bg → bg,
@@ -2367,14 +2415,16 @@ const bgModels = clusters.map((bg, ci) => {
       }
     }
   };
-  featherPass(1);
+  featherPass(2);
 
-  // Apply a strict binary mask: background pixels become fully transparent,
-  // while all other pixels remain untouched.
+  // Apply the soft mask as alpha to preserve the feathering work — edge
+  // pixels get smooth transparency instead of a hard cutoff, which keeps
+  // text and fine details looking natural rather than artificially sharp.
   for (let i = 0; i < w * h; i++) {
-    if (mask[i] < 128) {
-      px[i * 4 + 3] = 0;
-    }
+    const ma = mask[i];
+    const existing = px[i * 4 + 3];
+    // Only reduce alpha (make transparent), never increase it.
+    if (ma < existing) px[i * 4 + 3] = ma;
   }
 
   ctx.putImageData(imageData, 0, 0);
@@ -2596,7 +2646,7 @@ async function processVideoOffline(
               if (filter !== "none") c.filter = filter;
               sample.draw(c, 0, 0, w, h);
               if (filter !== "none") c.filter = "none";
-              if (plan) applyInpaintPlan(c, plan);
+              if (plan) applyInpaintPlan(c, plan, true);
               return canvas!;
             },
             processedWidth: w,
@@ -2734,7 +2784,7 @@ async function processVideoRealtime(
     if (filter !== "none") ctx.filter = filter;
     ctx.drawImage(video, 0, 0, w, h);
     if (filter !== "none") ctx.filter = "none";
-    if (plan) applyInpaintPlan(ctx, plan);
+    if (plan) applyInpaintPlan(ctx, plan, true);
     if (onProgress && isFinite(video.duration) && video.duration > 0) {
       onProgress(
         Math.min(99, Math.round((video.currentTime / video.duration) * 100)),
