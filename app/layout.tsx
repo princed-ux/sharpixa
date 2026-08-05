@@ -1,135 +1,386 @@
-import type { Metadata } from "next";
+import type {
+  Metadata,
+  Viewport,
+} from "next";
+import type { ReactNode } from "react";
 import Script from "next/script";
 import "./globals.css";
 
+const DEFAULT_SITE_URL =
+  "https://sharpixa.com";
+
+const ADSENSE_CLIENT_ID =
+  "ca-pub-3890435207453108";
+
+function resolveSiteUrl(): string {
+  const configuredUrl =
+    process.env.NEXT_PUBLIC_SITE_URL?.trim();
+
+  if (!configuredUrl) {
+    return DEFAULT_SITE_URL;
+  }
+
+  try {
+    return new URL(
+      configuredUrl,
+    ).origin;
+  } catch {
+    return DEFAULT_SITE_URL;
+  }
+}
+
+const SITE_URL =
+  resolveSiteUrl();
+
+const SITE_NAME =
+  "Sharpixa";
+
+const SITE_DESCRIPTION =
+  "Browser-based tools for removing unwanted objects and text, creating transparent image backgrounds, and improving image or video presentation.";
+
 export const metadata: Metadata = {
-  title: "Sharpixa — Remove Watermarks, Backgrounds & Enhance Images & Videos Free Online",
+  metadataBase:
+    new URL(SITE_URL),
+
+  applicationName:
+    SITE_NAME,
+
+  title: {
+    default:
+      "Sharpixa | Browser-Based Image and Video Tools",
+
+    template:
+      "%s | Sharpixa",
+  },
+
   description:
-    "Remove watermarks, logos, text, and objects from images and videos online free. Remove image backgrounds and enhance quality to 4K/8K. No signup required. 100% free.",
+    SITE_DESCRIPTION,
+
   keywords: [
-    "watermark remover",
-    "remove watermark from image",
-    "remove watermark from video",
+    "Sharpixa",
+    "object remover",
+    "text remover",
+    "authorized watermark remover",
     "background remover",
+    "transparent PNG maker",
     "image enhancer",
     "video enhancer",
-    "image deblur",
-    "video upscaler",
-    "4K video enhancer",
-    "photo enhancement",
-    "blur removal",
-    "logo remover",
-    "text remover from image",
-    "Sharpixa",
+    "image resizer",
+    "image sharpening",
+    "browser image editor",
   ],
-  authors: [{ name: "Sharpixa" }],
-  alternates: { canonical: "https://sharpixa.com/" },
+
+  authors: [
+    {
+      name:
+        SITE_NAME,
+
+      url:
+        SITE_URL,
+    },
+  ],
+
+  creator:
+    SITE_NAME,
+
+  publisher:
+    SITE_NAME,
+
+  category:
+    "Multimedia",
+
+  referrer:
+    "origin-when-cross-origin",
+
+  formatDetection: {
+    email: false,
+    address: false,
+    telephone: false,
+  },
+
+  alternates: {
+    canonical: "/",
+  },
+
+  icons: {
+    icon: [
+      {
+        url:
+          "/sharpixa-logo.png",
+
+        type:
+          "image/png",
+      },
+    ],
+
+    shortcut:
+      "/sharpixa-logo.png",
+
+    apple:
+      "/sharpixa-logo.png",
+  },
+
   openGraph: {
-    type: "website",
-    url: "https://sharpixa.com/",
-    title: "Sharpixa — Remove Watermarks, Backgrounds & Enhance Images & Videos Free Online",
+    type:
+      "website",
+
+    locale:
+      "en_US",
+
+    url:
+      "/",
+
+    siteName:
+      SITE_NAME,
+
+    title:
+      "Sharpixa | Browser-Based Image and Video Tools",
+
     description:
-      "Remove watermarks, logos, text, and objects from images and videos online free. Background removal and enhancement with no signup required.",
-    siteName: "Sharpixa",
+      SITE_DESCRIPTION,
+
+    images: [
+      {
+        url:
+          "/sharpixa-logo.png",
+
+        width:
+          1156,
+
+        height:
+          1231,
+
+        alt:
+          "Sharpixa logo",
+      },
+    ],
   },
+
   twitter: {
-    card: "summary_large_image",
-    title: "Sharpixa — Remove Watermarks, Backgrounds & Enhance Images & Videos",
+    card:
+      "summary_large_image",
+
+    title:
+      "Sharpixa | Browser-Based Image and Video Tools",
+
     description:
-      "Remove watermarks, logos, text, and objects from images and videos online free. No signup required.",
+      SITE_DESCRIPTION,
+
+    images: [
+      "/sharpixa-logo.png",
+    ],
   },
-  robots: { index: true, follow: true },
+
+  robots: {
+    index: true,
+    follow: true,
+
+    nocache: false,
+
+    googleBot: {
+      index: true,
+      follow: true,
+
+      "max-video-preview":
+        -1,
+
+      "max-image-preview":
+        "large",
+
+      "max-snippet":
+        -1,
+    },
+  },
+
+  other: {
+    "google-adsense-account":
+      ADSENSE_CLIENT_ID,
+  },
 };
+
+export const viewport: Viewport = {
+  width:
+    "device-width",
+
+  initialScale:
+    1,
+
+  maximumScale:
+    5,
+
+  viewportFit:
+    "cover",
+
+  themeColor:
+    "#ffffff",
+
+  colorScheme:
+    "light",
+};
+
+const structuredData = {
+  "@context":
+    "https://schema.org",
+
+  "@graph": [
+    {
+      "@type":
+        "Organization",
+
+      "@id":
+        `${SITE_URL}/#organization`,
+
+      name:
+        SITE_NAME,
+
+      url:
+        SITE_URL,
+
+      logo: {
+        "@type":
+          "ImageObject",
+
+        url:
+          `${SITE_URL}/sharpixa-logo.png`,
+
+        width:
+          1156,
+
+        height:
+          1231,
+      },
+    },
+
+    {
+      "@type":
+        "WebSite",
+
+      "@id":
+        `${SITE_URL}/#website`,
+
+      url:
+        SITE_URL,
+
+      name:
+        SITE_NAME,
+
+      description:
+        SITE_DESCRIPTION,
+
+      publisher: {
+        "@id":
+          `${SITE_URL}/#organization`,
+      },
+
+      inLanguage:
+        "en",
+    },
+
+    {
+      "@type":
+        "WebApplication",
+
+      "@id":
+        `${SITE_URL}/#web-application`,
+
+      name:
+        SITE_NAME,
+
+      url:
+        SITE_URL,
+
+      description:
+        SITE_DESCRIPTION,
+
+      applicationCategory:
+        "MultimediaApplication",
+
+      applicationSubCategory:
+        "Image and video editing",
+
+      operatingSystem:
+        "Any",
+
+      browserRequirements:
+        "Requires JavaScript and a modern web browser.",
+
+      isAccessibleForFree:
+        true,
+
+      provider: {
+        "@id":
+          `${SITE_URL}/#organization`,
+      },
+
+      offers: {
+        "@type":
+          "Offer",
+
+        price:
+          "0",
+
+        priceCurrency:
+          "USD",
+
+        availability:
+          "https://schema.org/OnlineOnly",
+      },
+
+      featureList: [
+        "Manual unwanted-object and text selection",
+        "Authorized watermark cleanup",
+        "Automatic image background removal",
+        "Manual background selection",
+        "Transparent PNG export",
+        "Image resizing and adjustment",
+        "Compatible video processing",
+        "Browser-based file-processing workflow",
+      ],
+    },
+  ],
+};
+
+function serializeStructuredData(
+  value: unknown,
+): string {
+  return JSON.stringify(
+    value,
+  ).replace(
+    /</g,
+    "\\u003c",
+  );
+}
+
+interface RootLayoutProps {
+  children: ReactNode;
+}
 
 export default function RootLayout({
   children,
-}: Readonly<{ children: React.ReactNode }>) {
-  const jsonLdWebApp = {
-    "@context": "https://schema.org",
-    "@type": "WebApplication",
-    name: "Sharpixa",
-    url: "https://sharpixa.com",
-    description:
-      "Free online watermark removal, background removal, and image/video enhancement tool. Remove logos, text, and objects with powerful in-browser processing.",
-    applicationCategory: "MultimediaApplication",
-    operatingSystem: "Web",
-    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-    aggregateRating: {
-      "@type": "AggregateRating",
-      ratingValue: "4.8",
-      ratingCount: "12750",
-    },
-  };
-
-  const jsonLdFaq = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: [
-      {
-        "@type": "Question",
-        name: "Is Sharpixa free?",
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: "Yes! Sharpixa is completely free to use. No signup or account needed. Just upload your file and remove watermarks, backgrounds, or enhance quality instantly.",
-        },
-      },
-      {
-        "@type": "Question",
-        name: "How does watermark removal work?",
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: "Upload your file and use the brush tool to mark the watermark area. The tool processes the region and fills it naturally using the surrounding pixels, leaving the background intact.",
-        },
-      },
-      {
-        "@type": "Question",
-        name: "What file formats are supported?",
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: "Images: JPG, JPEG, PNG, WEBP. Videos: MP4, MOV, AVI, WEBM, MKV.",
-        },
-      },
-      {
-        "@type": "Question",
-        name: "Are my files private?",
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: "Absolutely. Everything runs in your browser using Canvas API and WebCodecs. No files are ever uploaded to any server. Your files never leave your device.",
-        },
-      },
-      {
-        "@type": "Question",
-        name: "Can I remove watermarks from videos?",
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: "Yes. Upload a video, use the brush tool to mark the watermark area on the first frame, and the tool will process the entire video frame by frame while preserving audio and original duration.",
-        },
-      },
-    ],
-  };
-
+}: Readonly<RootLayoutProps>) {
   return (
     <html lang="en">
-      <head>
-        <meta name="google-adsense-account" content="ca-pub-3890435207453108" />
+      <body className="min-h-dvh bg-white text-sm text-gray-900 antialiased">
         <Script
+          id="sharpixa-structured-data"
+          type="application/ld+json"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html:
+              serializeStructuredData(
+                structuredData,
+              ),
+          }}
+        />
+
+        <Script
+          id="sharpixa-adsense"
           async
-          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3890435207453108"
+          src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`}
           crossOrigin="anonymous"
           strategy="afterInteractive"
         />
-        <link rel="icon" href="/sharpixa-logo.png" />
-        <link rel="apple-touch-icon" href="/sharpixa-logo.png" />
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdWebApp) }}
-        />
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdFaq) }}
-        />
-      </head>
-      <body className="min-h-dvh text-sm antialiased">
+
         {children}
       </body>
     </html>
