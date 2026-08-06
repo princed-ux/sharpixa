@@ -87,23 +87,21 @@ export interface VideoPreflightResult {
 
 /**
  * Pixel filters use tile-sized buffers, but the browser still needs backing
- * stores for decoded, working, and output canvases. These conservative limits
- * keep unavoidable memory bounded. Device hints are advisory only.
+ * stores for decoded, working, and output canvases.
  */
 export const DEFAULT_MAX_PROCESSING_PIXELS =
-  6_000_000;
+  8_000_000;
 
 export const LOW_MEMORY_MAX_PROCESSING_PIXELS =
-  3_000_000;
+  4_000_000;
 
 export const HIGH_MEMORY_MAX_PROCESSING_PIXELS =
-  10_000_000;
+  14_000_000;
 
 /**
- * Browser ONNX inference is much more memory hungry than ordinary canvas
- * filters. Keep the neural-network working image deliberately smaller than
- * the final PNG, then restore the alpha mask onto the browser-safe output
- * dimensions after inference.
+ * Browser ONNX inference is more memory intensive than ordinary canvas work.
+ * The model can operate on a smaller working copy while Sharpixa preserves a
+ * larger final output where the browser can safely do so.
  */
 export const LOW_MEMORY_MAX_BACKGROUND_INFERENCE_PIXELS =
   1_250_000;
@@ -115,41 +113,48 @@ export const HIGH_MEMORY_MAX_BACKGROUND_INFERENCE_PIXELS =
   4_000_000;
 
 export const DEFAULT_MAX_OUTPUT_PIXELS =
-  12_000_000;
-
-export const LOW_MEMORY_MAX_OUTPUT_PIXELS =
-  6_000_000;
-
-export const HIGH_MEMORY_MAX_OUTPUT_PIXELS =
-  20_000_000;
-
-export const DEFAULT_MAX_DECODE_PIXELS =
-  24_000_000;
-
-export const LOW_MEMORY_MAX_DECODE_PIXELS =
-  12_000_000;
-
-export const HIGH_MEMORY_MAX_DECODE_PIXELS =
   32_000_000;
 
+export const LOW_MEMORY_MAX_OUTPUT_PIXELS =
+  18_000_000;
+
+export const HIGH_MEMORY_MAX_OUTPUT_PIXELS =
+  64_000_000;
+
+export const DEFAULT_MAX_DECODE_PIXELS =
+  160_000_000;
+
+export const LOW_MEMORY_MAX_DECODE_PIXELS =
+  80_000_000;
+
+export const HIGH_MEMORY_MAX_DECODE_PIXELS =
+  320_000_000;
+
 export const DEFAULT_MAX_INPAINT_REGION_PIXELS =
-  1_000_000;
+  2_500_000;
 
 export const LOW_MEMORY_MAX_INPAINT_REGION_PIXELS =
-  500_000;
-
-export const HIGH_MEMORY_MAX_INPAINT_REGION_PIXELS =
   1_500_000;
 
-export const MAX_IMAGE_DIMENSION = 7680;
-export const ESTIMATED_IMAGE_BUFFER_COUNT = 4;
-export const ESTIMATED_BACKGROUND_BUFFER_COUNT = 6;
-export const MAX_INPAINT_SELECTION_RATIO = 0.25;
+export const HIGH_MEMORY_MAX_INPAINT_REGION_PIXELS =
+  4_000_000;
+
+export const MAX_IMAGE_DIMENSION =
+  12_000;
+
+export const ESTIMATED_IMAGE_BUFFER_COUNT =
+  4;
+
+export const ESTIMATED_BACKGROUND_BUFFER_COUNT =
+  6;
+
+export const MAX_INPAINT_SELECTION_RATIO =
+  0.45;
 
 /**
- * Sharpixa accepts videos up to five minutes, but long clips are processed in
- * an adaptive reduced-resolution mode. This keeps the page responsive while
- * making it clear that browser processing may take a long time.
+ * Sharpixa accepts videos up to five minutes. Longer clips use progressively
+ * lower processing resolutions and frame rates to keep browser processing
+ * manageable.
  */
 export const MAX_CLIENT_VIDEO_DURATION_SECONDS =
   5 * 60;
@@ -158,33 +163,35 @@ export const MAX_CLIENT_VIDEO_FILE_SIZE_BYTES =
   300 * 1024 * 1024;
 
 /**
- * These legacy names are retained because the worker imports them.
- *
- * Both are set to the maximum long edge so portrait 1080 × 1920 files are not
- * rejected merely because their height exceeds 1080.
- *
- * Exact orientation-safe validation uses MAX_CLIENT_VIDEO_LONG_EDGE and
- * MAX_CLIENT_VIDEO_SHORT_EDGE below.
+ * These legacy names remain available because worker code may import them.
+ * Both use the maximum long edge so portrait 1080 × 1920 video is supported.
  */
-export const MAX_CLIENT_VIDEO_WIDTH = 1920;
-export const MAX_CLIENT_VIDEO_HEIGHT = 1920;
+export const MAX_CLIENT_VIDEO_WIDTH =
+  1920;
 
-export const MAX_CLIENT_VIDEO_LONG_EDGE = 1920;
-export const MAX_CLIENT_VIDEO_SHORT_EDGE = 1080;
+export const MAX_CLIENT_VIDEO_HEIGHT =
+  1920;
+
+export const MAX_CLIENT_VIDEO_LONG_EDGE =
+  1920;
+
+export const MAX_CLIENT_VIDEO_SHORT_EDGE =
+  1080;
 
 export const MAX_CLIENT_VIDEO_PIXELS_PER_FRAME =
   2_073_600;
 
-export const MAX_CLIENT_VIDEO_FRAME_RATE = 24;
+export const MAX_CLIENT_VIDEO_FRAME_RATE =
+  24;
 
 const LOW_MEMORY_MAX_ESTIMATED_BYTES =
-  128 * 1024 * 1024;
+  512 * 1024 * 1024;
 
 const DEFAULT_MAX_ESTIMATED_BYTES =
-  224 * 1024 * 1024;
+  768 * 1024 * 1024;
 
 const HIGH_MEMORY_MAX_ESTIMATED_BYTES =
-  384 * 1024 * 1024;
+  1024 * 1024 * 1024;
 
 const STANDARD_VIDEO_PROFILE: VideoAdaptiveProfile = {
   mode: "standard",
@@ -274,7 +281,7 @@ const MAXIMUM_VIDEO_PROFILE: VideoAdaptiveProfile = {
     12,
 
   warning:
-    "This long clip will be processed in a reduced 480p-class mode at up to 12 fps. It may take a long time and use significant CPU, but the worker keeps the page responsive. Keep the device plugged in and leave this tab open.",
+    "This long clip will be processed in a reduced 480p-class mode at up to 12 fps. It may take a long time and use significant CPU. Keep the device plugged in and leave this tab open.",
 };
 
 function clampPositiveInteger(
@@ -397,12 +404,9 @@ function constrainDimensions(
 }
 
 /**
- * Constrain by long and short edges rather than fixed width and height.
- *
- * This supports both:
- *
- * - Landscape: 1920 × 1080
- * - Portrait: 1080 × 1920
+ * Constrain video dimensions by long and short edges instead of fixed width
+ * and height. This supports both landscape 1920 × 1080 and portrait
+ * 1080 × 1920.
  */
 function constrainVideoDimensions(
   dimensions: Dimensions,
@@ -712,8 +716,8 @@ export function createImageProcessingPlan(
 
   /*
    * Automatic background removal no longer forces the exported PNG down to
-   * the inference resolution. The worker runs the model on plan.working and
-   * applies the returned alpha matte to plan.output afterwards.
+   * the neural-network inference resolution. The worker can run the model on
+   * plan.working and restore the alpha mask onto plan.output afterward.
    */
   const operationPixelLimit =
     safetyProfile.maxOutputPixels;
@@ -787,8 +791,8 @@ export function createImageProcessingPlan(
     capReason:
       capped
         ? cappedByDimension
-          ? "The requested edge exceeded the browser-safe 7,680 px canvas limit."
-          : "The requested output exceeded this device's conservative browser-memory limit."
+          ? "Sharpixa automatically fitted the requested image inside a 12,000 px browser canvas."
+          : "Sharpixa automatically optimized the output size for this device while preserving the aspect ratio."
         : null,
 
     estimatedRequestedBytes:
@@ -905,10 +909,26 @@ export function createVideoOutputPlan(
   };
 }
 
+/**
+ * Validate only whether the decoded image dimensions are fundamentally usable.
+ *
+ * Do not reject an image merely because it has a high megapixel count. The
+ * processing planner automatically creates a safe working canvas and preserves
+ * the largest practical output supported by the current device.
+ */
 export function validateImageSource(
   source: Dimensions,
-  hints: DeviceHints = {},
+  _hints: DeviceHints = {},
 ): string | null {
+  if (
+    !Number.isFinite(source.width) ||
+    !Number.isFinite(source.height) ||
+    source.width <= 0 ||
+    source.height <= 0
+  ) {
+    return "This image does not contain valid dimensions.";
+  }
+
   const width =
     clampPositiveInteger(
       source.width,
@@ -919,30 +939,16 @@ export function validateImageSource(
       source.height,
     );
 
-  const profile =
-    getSafetyProfile(
-      hints,
-    );
-
+  /*
+   * 65,535 is a common dimension limit in image formats and browser image
+   * pipelines. Images below this edge limit should proceed to planning instead
+   * of being rejected based on megapixels.
+   */
   if (
-    width > 16_384 ||
-    height > 16_384
+    width > 65_535 ||
+    height > 65_535
   ) {
-    return "This image has an edge longer than 16,384 pixels and cannot be decoded safely in the browser. Try a smaller image.";
-  }
-
-  if (
-    width *
-      height >
-    profile.maxDecodePixels
-  ) {
-    return `This image contains ${Math.round(
-      (
-        width *
-        height
-      ) /
-        1_000_000,
-    )} megapixels, which is above this device's safe browser decode limit. Resize it before processing.`;
+    return "This image has an edge above the browser image-format limit.";
   }
 
   return null;

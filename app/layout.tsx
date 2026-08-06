@@ -4,6 +4,7 @@ import type {
 } from "next";
 import type { ReactNode } from "react";
 import Script from "next/script";
+import InstallApp from "@/components/InstallApp";
 import "./globals.css";
 
 const DEFAULT_SITE_URL =
@@ -44,6 +45,17 @@ export const metadata: Metadata = {
 
   applicationName:
     SITE_NAME,
+
+  manifest:
+    "/manifest.webmanifest",
+
+  appleWebApp: {
+    capable: true,
+    statusBarStyle:
+      "default",
+    title:
+      SITE_NAME,
+  },
 
   title: {
     default:
@@ -382,6 +394,8 @@ export default function RootLayout({
         />
 
         {children}
+
+        <InstallApp />
       </body>
     </html>
   );

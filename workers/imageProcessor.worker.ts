@@ -58,18 +58,12 @@ const THIRD_PARTY_HEARTBEAT_MS =
   1_500;
 
 /**
- * A small watermark should never require a 92 MB model download or a long
- * neural inference. The edge-aware local engine is faster and preserves the
- * original resolution, so it is the default for compact selections. LaMa is
- * reserved for genuinely large or deep object-removal regions.
+ * Watermark quality is more important than avoiding the model download. The
+ * local directional filler remains an emergency fallback only; it can smear
+ * hard geometric edges when a watermark crosses multiple regions.
  */
-const FAST_LOCAL_INPAINT_MAX_SELECTED_PIXELS = 90_000;
-const FAST_LOCAL_INPAINT_MAX_BOUNDS_PIXELS = 220_000;
-const FAST_LOCAL_INPAINT_MAX_BOUNDS_SIDE = 720;
-const FAST_LOCAL_INPAINT_MAX_REGION_PIXELS = 800_000;
-
 function shouldUseFastLocalInpaint(
-  analysis: {
+  _analysis: {
     selectedPixels: number;
     selectedRatio: number;
     bounds: {
@@ -77,63 +71,12 @@ function shouldUseFastLocalInpaint(
       height: number;
     } | null;
   },
-  region: {
+  _region: {
     width: number;
     height: number;
   },
 ): boolean {
-  const bounds = analysis.bounds;
-
-  if (!bounds) {
-    return true;
-  }
-
-  const boundsPixels =
-    Math.max(1, bounds.width) *
-    Math.max(1, bounds.height);
-
-  const regionPixels =
-    Math.max(1, region.width) *
-    Math.max(1, region.height);
-
-  const compactSelection =
-    analysis.selectedPixels <=
-      FAST_LOCAL_INPAINT_MAX_SELECTED_PIXELS &&
-    boundsPixels <=
-      FAST_LOCAL_INPAINT_MAX_BOUNDS_PIXELS &&
-    Math.max(bounds.width, bounds.height) <=
-      FAST_LOCAL_INPAINT_MAX_BOUNDS_SIDE &&
-    regionPixels <=
-      FAST_LOCAL_INPAINT_MAX_REGION_PIXELS;
-
-  const deviceMemory =
-    typeof navigator === "undefined"
-      ? 4
-      : navigator.deviceMemory ?? 4;
-
-  const hardwareConcurrency =
-    typeof navigator === "undefined"
-      ? 4
-      : navigator.hardwareConcurrency || 4;
-
-  const highResolutionCompactSelection =
-    analysis.selectedRatio <= 0.02 &&
-    analysis.selectedPixels <= 250_000 &&
-    boundsPixels <= 520_000 &&
-    Math.max(bounds.width, bounds.height) <= 900 &&
-    regionPixels <= 1_300_000;
-
-  const limitedDeviceSelection =
-    (deviceMemory <= 4 || hardwareConcurrency <= 4) &&
-    analysis.selectedPixels <= 150_000 &&
-    boundsPixels <= 360_000 &&
-    regionPixels <= 1_100_000;
-
-  return (
-    compactSelection ||
-    highResolutionCompactSelection ||
-    limitedDeviceSelection
-  );
+  return false;
 }
 
 function send(
@@ -870,56 +813,55 @@ async function processMaskOperation(
           },
         );
 
-      const runLocalInpaint = async (): Promise<void> => {
-        // Complete the unused model stage so progress moves forward instead of
-        // appearing stuck while a small selection is reconstructed locally.
-        reportStage(
-          jobId,
-          "loading-model",
-          1,
-        );
+      const runLocalInpaint =
+        async (): Promise<void> => {
+          reportStage(
+            jobId,
+            "loading-model",
+            1,
+          );
 
-        reportStage(
-          jobId,
-          "processing-tiles",
-          0.02,
-        );
+          reportStage(
+            jobId,
+            "processing-tiles",
+            0.02,
+          );
 
-        await applyInpaintPlan(
-          {
-            context:
-              output.context,
+          await applyInpaintPlan(
+            {
+              context:
+                output.context,
 
-            plan:
-              inpaintPlan,
+              plan:
+                inpaintPlan,
 
-            checkCancelled:
-              () =>
-                checkCancelled(
-                  jobId,
-                ),
+              checkCancelled:
+                () =>
+                  checkCancelled(
+                    jobId,
+                  ),
 
-            yieldControl:
-              () =>
-                yieldControl(
-                  jobId,
-                ),
+              yieldControl:
+                () =>
+                  yieldControl(
+                    jobId,
+                  ),
 
-            onProgress:
-              (
-                ratio,
-              ) => {
-                reportStage(
-                  jobId,
-
-                  "processing-tiles",
-
+              onProgress:
+                (
                   ratio,
-                );
-              },
-          },
-        );
-      };
+                ) => {
+                  reportStage(
+                    jobId,
+
+                    "processing-tiles",
+
+                    ratio,
+                  );
+                },
+            },
+          );
+        };
 
       if (
         shouldUseFastLocalInpaint(
@@ -932,7 +874,8 @@ async function processMaskOperation(
         let aiStage: ProcessingStage =
           "loading-model";
 
-        let aiRatio = 0;
+        let aiRatio =
+          0;
 
         try {
           await runWithHeartbeat(
@@ -940,10 +883,12 @@ async function processMaskOperation(
               jobId,
 
               getStage:
-                () => aiStage,
+                () =>
+                  aiStage,
 
               getRatio:
-                () => aiRatio,
+                () =>
+                  aiRatio,
 
               task:
                 () =>
@@ -979,8 +924,11 @@ async function processMaskOperation(
                           stage,
                           ratio,
                         ) => {
-                          aiStage = stage;
-                          aiRatio = ratio;
+                          aiStage =
+                            stage;
+
+                          aiRatio =
+                            ratio;
 
                           reportStage(
                             jobId,
@@ -992,7 +940,9 @@ async function processMaskOperation(
                   ),
             },
           );
-        } catch (error) {
+        } catch (
+          error
+        ) {
           if (
             error instanceof
             WorkerCancelledError
@@ -1001,9 +951,8 @@ async function processMaskOperation(
           }
 
           /*
-           * Model loading can fail on a restricted network, unsupported WASM
-           * runtime, or first-load interruption. Keep the operation usable with
-           * the edge-aware local fallback instead of failing the entire edit.
+           * The local method is used only when the AI model genuinely cannot
+           * load or execute. It prevents the entire edit from being lost.
            */
           console.warn(
             "LaMa inpainting was unavailable; using the local edge-aware fallback.",
@@ -1071,8 +1020,8 @@ function getBackgroundRemovalModule(): Promise<
         ) => {
           /*
            * Do not permanently cache a rejected dynamic import.
-           * A temporary chunk or network failure must be retryable
-           * after the worker client recreates this worker.
+           * A temporary chunk or network failure must be retryable after the
+           * image worker is recreated.
            */
           backgroundRemovalModulePromise =
             null;
@@ -1100,23 +1049,27 @@ async function runWithHeartbeat<T>(
   },
 ): Promise<T> {
   const heartbeat =
-    setInterval(() => {
-      if (
-        cancelledJobs.has(
+    setInterval(
+      () => {
+        if (
+          cancelledJobs.has(
+            options.jobId,
+          )
+        ) {
+          return;
+        }
+
+        reportStage(
           options.jobId,
-        )
-      ) {
-        return;
-      }
 
-      reportStage(
-        options.jobId,
+          options.getStage(),
 
-        options.getStage(),
+          options.getRatio(),
+        );
+      },
 
-        options.getRatio(),
-      );
-    }, THIRD_PARTY_HEARTBEAT_MS);
+      THIRD_PARTY_HEARTBEAT_MS,
+    );
 
   try {
     return await options.task();
@@ -1214,9 +1167,9 @@ async function createCappedBackgroundSource(
 
 /**
  * IMG.LY returns a transparent foreground at the neural-network input size.
- * For reliability we run inference on plan.working, then scale only the alpha
- * matte back onto the browser-safe plan.output image. This preserves the
- * original RGB detail while avoiding full-resolution ONNX inference.
+ * Sharpixa runs inference on plan.working and scales only the alpha matte back
+ * onto the larger browser-safe output. This keeps the original image colours
+ * and details rather than enlarging the model's processed RGB output.
  */
 async function restoreAutomaticBackgroundOutput(
   request:
@@ -1315,8 +1268,8 @@ async function restoreAutomaticBackgroundOutput(
     drawn.context.save();
 
     /*
-     * destination-in keeps the original source colours and uses only the
-     * foreground result's alpha channel as the cut-out mask.
+     * destination-in preserves the original source RGB and uses only the
+     * generated foreground's alpha channel as the cut-out mask.
      */
     drawn.context.globalCompositeOperation =
       "destination-in";
@@ -1412,14 +1365,15 @@ async function processAutomaticBackground(
             heartbeatRatio,
 
         task:
-          async () => {
-            return getBackgroundRemovalModule()
-              .catch(() => {
-                throw new Error(
-                  "model-load-failed",
-                );
-              });
-          },
+          async () =>
+            getBackgroundRemovalModule()
+              .catch(
+                () => {
+                  throw new Error(
+                    "model-load-failed",
+                  );
+                },
+              ),
       },
     );
 
@@ -1638,10 +1592,8 @@ async function processAutomaticBackground(
       }
 
       /*
-       * Unknown package keys are still forwarded as independent
-       * resources. The main-thread progress controller tracks each key
-       * separately and therefore does not move backwards when another
-       * package resource starts from zero.
+       * Unknown package keys remain separate resources. The main-thread
+       * progress controller tracks each key independently.
        */
       reportResource(
         jobId,
@@ -1688,9 +1640,8 @@ async function processAutomaticBackground(
     unknown = null;
 
   /*
-   * The smaller quantized model is the safer default on ordinary devices.
-   * High-memory devices try the higher-quality fp16 model first and fall back
-   * once if browser inference rejects or runs out of memory.
+   * The quantized model is safer on ordinary devices. High-memory devices try
+   * the FP16 model first and automatically fall back to the quantized model.
    */
   for (
     const model of
@@ -1710,9 +1661,7 @@ async function processAutomaticBackground(
       model,
 
       /*
-       * Sharpixa has already placed the whole operation inside its own
-       * dedicated worker. Creating another nested proxy worker would add
-       * another lifecycle and failure path.
+       * Sharpixa already runs the operation in a dedicated image worker.
        */
       proxyToWorker:
         false,
@@ -1782,10 +1731,6 @@ async function processAutomaticBackground(
         );
       }
 
-      /*
-       * Keep the next attempt alive and visible. The main-thread controller
-       * clamps percentage progress upward, so a fallback never jumps back.
-       */
       heartbeatStage =
         "loading-model";
 
@@ -1818,7 +1763,6 @@ async function processAutomaticBackground(
         : "background-processing-failed",
     );
   }
-
 
   checkCancelled(
     jobId,
@@ -1907,7 +1851,7 @@ function serializeError(
         "decode-failed",
 
       message:
-        "The image could not be decoded. It may be corrupt or use an unsupported format.",
+        "Sharpixa could not read this image. Try saving it as a standard JPG, PNG, or WEBP file and upload it again.",
     };
   }
 
@@ -1922,7 +1866,7 @@ function serializeError(
         "canvas-failed",
 
       message:
-        "The browser could not allocate a safe image canvas.",
+        "Sharpixa could not prepare the image workspace on this device. Close unused browser tabs and try again.",
     };
   }
 
@@ -1935,7 +1879,7 @@ function serializeError(
         "selection-empty",
 
       message:
-        "The selection is empty. Paint the area you want to process and try again.",
+        "Paint directly over the watermark or object before starting removal.",
     };
   }
 
@@ -1948,7 +1892,7 @@ function serializeError(
         "selection-too-large",
 
       message:
-        "The selected area is too large for safe browser reconstruction. Use a smaller, more precise selection.",
+        "The selected area is too broad. Paint closely over only the watermark or unwanted object.",
     };
   }
 
@@ -1961,7 +1905,7 @@ function serializeError(
         "model-load-failed",
 
       message:
-        "The automatic background model could not be loaded. Check your connection and try again, or use Manual mode.",
+        "Sharpixa could not load the required AI model. Check the connection and try again.",
     };
   }
 
@@ -1974,7 +1918,7 @@ function serializeError(
         "processing-failed",
 
       message:
-        "Automatic background removal could not finish safely. Try a smaller image or switch to Manual mode.",
+        "Automatic background removal could not finish on this device. Try again or use Manual mode.",
     };
   }
 
@@ -1992,7 +1936,7 @@ function serializeError(
           : "encode-failed",
 
       message:
-        "The browser could not encode the result. Try a smaller output size.",
+        "Sharpixa finished processing but could not create the downloadable image. Try again.",
     };
   }
 
@@ -2001,7 +1945,7 @@ function serializeError(
       "processing-failed",
 
     message:
-      "The image operation could not be completed safely.",
+      "Sharpixa could not complete this image operation. Try again with a more precise selection.",
   };
 }
 
@@ -2103,7 +2047,9 @@ async function processRequest(
       capped:
         request.plan.capped,
     });
-  } catch (error) {
+  } catch (
+    error
+  ) {
     if (
       error instanceof
         WorkerCancelledError ||

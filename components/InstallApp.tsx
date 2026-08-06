@@ -26,14 +26,12 @@ export default function InstallApp() {
   const [iOSDevice, setIOSDevice] = useState(false);
 
   useEffect(() => {
-    if (process.env.NODE_ENV === "production") {
-      if ("serviceWorker" in navigator && window.isSecureContext) {
-        navigator.serviceWorker
-          .register("/sw.js")
-          .catch(() => {
-            // Registration is optional; the site works without it.
-          });
-      }
+    if ("serviceWorker" in navigator && window.isSecureContext) {
+      navigator.serviceWorker
+        .register("/sw.js")
+        .catch(() => {
+          // Registration is optional; the site works without it.
+        });
     }
   }, []);
 

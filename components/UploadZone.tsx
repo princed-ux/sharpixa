@@ -729,6 +729,11 @@ export default function UploadZone({
       null,
     );
 
+  const fileSelectionIdRef =
+    useRef(
+      0,
+    );
+
   const progressRef =
     useRef<ProgressController | null>(
       null,
@@ -1123,6 +1128,13 @@ export default function UploadZone({
   const reset =
     useCallback(
       async () => {
+        /*
+         * Invalidate every earlier upload/preflight operation so an old file
+         * inspection cannot update the interface after the editor is reset.
+         */
+        fileSelectionIdRef.current +=
+          1;
+
         await cancelCurrentWork();
 
         if (
@@ -1955,10 +1967,24 @@ export default function UploadZone({
           return;
         }
 
+        /*
+         * Every new selection gets its own identity. This prevents a previous
+         * video inspection, timeout, or cancellation from overwriting the
+         * state of a newer image selection.
+         */
+        const selectionId =
+          ++fileSelectionIdRef.current;
+
+        setError(
+          null,
+        );
+
         await cancelCurrentWork();
 
         if (
-          !mountedRef.current
+          !mountedRef.current ||
+          selectionId !==
+            fileSelectionIdRef.current
         ) {
           return;
         }
@@ -1969,45 +1995,75 @@ export default function UploadZone({
               ".",
             )
             .pop()
-            ?.toLowerCase() ??
+            ?.trim()
+            .toLowerCase() ??
           "";
 
-        const isImage =
-          inputFile.type.startsWith(
-            "image/",
-          ) ||
+        const imageByExtension =
           (
             IMAGE_FORMATS as readonly string[]
           ).includes(
             extension,
           );
 
-        const isVideo =
-          inputFile.type.startsWith(
-            "video/",
-          ) ||
+        const videoByExtension =
           (
             VIDEO_FORMATS as readonly string[]
           ).includes(
             extension,
           );
 
+        const mimeType =
+          inputFile.type
+            .trim()
+            .toLowerCase();
+
+        const imageByMime =
+          mimeType.startsWith(
+            "image/",
+          );
+
+        const videoByMime =
+          mimeType.startsWith(
+            "video/",
+          );
+
+        /*
+         * Prefer a recognized filename extension over the MIME value supplied
+         * by the browser or operating system. Downloaded images are sometimes
+         * assigned a generic or incorrect MIME type; a .png, .jpg, .jpeg, or
+         * .webp file must never enter the video-inspection path.
+         */
+        const nextType:
+          | Tab
+          | null =
+          imageByExtension
+            ? "image"
+            : videoByExtension
+              ? "video"
+              : imageByMime
+                ? "image"
+                : videoByMime
+                  ? "video"
+                  : null;
+
         if (
-          !isImage &&
-          !isVideo
+          !nextType
         ) {
           setError(
-            "Unsupported format. Use JPG, JPEG, PNG, WEBP, MP4, M4V, MOV, MKV, WEBM, OGG/OGV, or MPEG-TS.",
+            "Unsupported file format. Upload an image or a supported video file.",
           );
 
           return;
         }
 
-        const nextType:
-          Tab =
-          isImage
-            ? "image"
-            : "video";
+        setFileType(
+          nextType,
+        );
+
+        setTab(
+          nextType,
+        );
 
         if (
           mode ===
@@ -2126,10 +2182,6 @@ export default function UploadZone({
         );
 
         setSafetyNotice(
-          null,
-        );
-
-        setError(
           null,
         );
 
@@ -2287,6 +2339,8 @@ export default function UploadZone({
 
           if (
             !mountedRef.current ||
+            selectionId !==
+              fileSelectionIdRef.current ||
             fileUrlRef.current !==
               nextUrl ||
             preflight.signal.aborted
@@ -2396,6 +2450,13 @@ export default function UploadZone({
             "preflight-timeout";
 
           if (
+            selectionId !==
+              fileSelectionIdRef.current
+          ) {
+            return;
+          }
+
+          if (
             aborted &&
             !timedOut
           ) {
@@ -2463,22 +2524,28 @@ export default function UploadZone({
 
             setError(
               timedOut
-                ? "Sharpixa stopped waiting because this file took too long to inspect. Try a shorter or smaller video."
+                ? nextType ===
+                    "image"
+                  ? "Sharpixa stopped waiting because this image took too long to open. Try the upload again."
+                  : "Sharpixa stopped waiting because this video took too long to inspect. Try a shorter or smaller video."
                 : preflightError instanceof
                     WorkerProcessingError
                   ? preflightError.message
-                  : rawPreflightMessage ===
-                      "unsupported-video-container"
-                    ? "Sharpixa could not recognize this video's container. Try MP4, MOV, M4V, MKV, WEBM, OGG, or MPEG-TS."
-                    : unsupportedCodec
-                      ? `This browser cannot decode the ${codecName} video track. The file itself may be valid, but this device does not provide that codec.`
-                      : rawPreflightMessage ===
-                          "video-track-missing"
-                        ? "This file does not contain a readable video track."
+                  : nextType ===
+                      "image"
+                    ? "Sharpixa could not read this image. Try saving it as JPG, PNG, or WEBP and upload it again."
+                    : rawPreflightMessage ===
+                        "unsupported-video-container"
+                      ? "Sharpixa could not recognize this video's container. Try MP4, MOV, M4V, MKV, WEBM, OGG, or MPEG-TS."
+                      : unsupportedCodec
+                        ? `This browser cannot decode the ${codecName} video track. The file itself may be valid, but this device does not provide that codec.`
                         : rawPreflightMessage ===
-                            "video-poster-frame-missing"
-                          ? "Sharpixa found the video but could not decode its first usable frame."
-                          : "Sharpixa could not safely inspect this video. The container or codec may not be supported on this device.",
+                            "video-track-missing"
+                          ? "This file does not contain a readable video track."
+                          : rawPreflightMessage ===
+                              "video-poster-frame-missing"
+                            ? "Sharpixa found the video but could not decode its first usable frame."
+                            : "Sharpixa could not safely inspect this video. The container or codec may not be supported on this device.",
             );
           }
         } finally {
@@ -2495,7 +2562,9 @@ export default function UploadZone({
           }
 
           if (
-            mountedRef.current
+            mountedRef.current &&
+            selectionId ===
+              fileSelectionIdRef.current
           ) {
             setPreparing(
               false,
@@ -2764,7 +2833,20 @@ export default function UploadZone({
           ChangeEvent<HTMLInputElement>,
       ) => {
         const selected =
-          event.target.files?.[0];
+          event.currentTarget
+            .files?.[0] ??
+          null;
+
+        /*
+         * Clear the native input immediately. Selecting the same file again
+         * must trigger a fresh change event instead of leaving stale state.
+         */
+        event.currentTarget.value =
+          "";
+
+        setError(
+          null,
+        );
 
         if (
           selected
@@ -4309,6 +4391,21 @@ export default function UploadZone({
         className="hidden"
         accept={
           accept
+        }
+        onClick={
+          (
+            event,
+          ) => {
+            /*
+             * Permit the exact same file to be selected repeatedly.
+             */
+            event.currentTarget.value =
+              "";
+
+            setError(
+              null,
+            );
+          }
         }
         onChange={
           onFileChange
