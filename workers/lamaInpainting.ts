@@ -7,19 +7,17 @@ import {
 
 const MODEL_SIZE = 512;
 const EXPECTED_MODEL_BYTES = 92_600_000;
-const MODEL_CACHE_NAME = "sharpixa-inpainting-models-v2";
-const REMOTE_MODEL_URL =
+const MODEL_CACHE_NAME = "sharpixa-inpainting-models-v3";
+const MODEL_URL =
   "https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx";
-
-const MODEL_CACHE_KEY =
-  REMOTE_MODEL_URL;
-
-const MODEL_SOURCES = [
-  REMOTE_MODEL_URL,
-] as const;
 
 type OrtModule = typeof import("onnxruntime-web");
 type OrtSession = import("onnxruntime-web").InferenceSession;
+
+type DisposableValue = {
+  data?: ArrayLike<number>;
+  dispose?: () => void;
+};
 
 interface LoadedSession {
   ort: OrtModule;
@@ -30,56 +28,61 @@ export interface LamaInpaintOptions {
   context: OffscreenCanvasRenderingContext2D;
   plan: InpaintPlan;
   checkCancelled: () => void;
-
-  onResourceProgress?: (
-    current: number,
-    total: number,
-  ) => void;
-
+  onResourceProgress?: (current: number, total: number) => void;
   onStageProgress?: (
-    stage:
-      | "loading-model"
-      | "processing-tiles",
-
+    stage: "loading-model" | "processing-tiles",
     ratio: number,
   ) => void;
 }
 
-let sessionPromise:
-  | Promise<LoadedSession>
-  | null = null;
+let sessionPromise: Promise<LoadedSession> | null = null;
 
-function clampByte(
-  value: number,
-): number {
-  if (
-    !Number.isFinite(
+function clampByte(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+
+  return Math.max(
+    0,
+    Math.min(
+      255,
       value,
-    )
-  ) {
-    return 0;
-  }
-
-  return value < 0
-    ? 0
-    : value > 255
-      ? 255
-      : value;
-}
-
-function isHttpSuccess(
-  response: Response,
-): boolean {
-  return (
-    response.ok &&
-    response.status >= 200 &&
-    response.status < 300
+    ),
   );
 }
 
-async function getModelCache(): Promise<
-  Cache | null
-> {
+function disposeValue(value: unknown): void {
+  if (
+    value &&
+    typeof value === "object" &&
+    "dispose" in value &&
+    typeof (value as { dispose?: unknown }).dispose === "function"
+  ) {
+    try {
+      (value as { dispose: () => void }).dispose();
+    } catch {
+      /*
+       * Cleanup must never replace the actual processing
+       * result or error.
+       */
+    }
+  }
+}
+
+async function invalidateSession(
+  loaded: LoadedSession,
+): Promise<void> {
+  sessionPromise = null;
+
+  try {
+    await loaded.session.release();
+  } catch {
+    /*
+     * A failed runtime may already have released its
+     * underlying resources.
+     */
+  }
+}
+
+async function getModelCache(): Promise<Cache | null> {
   if (
     typeof caches ===
     "undefined"
@@ -98,30 +101,29 @@ async function getModelCache(): Promise<
 
 async function readResponseBytes(
   response: Response,
-
   options: Pick<
     LamaInpaintOptions,
-    | "checkCancelled"
-    | "onResourceProgress"
+    "checkCancelled" | "onResourceProgress"
   >,
 ): Promise<Uint8Array> {
-  const headerTotal =
+  const contentLength =
     Number(
       response.headers.get(
         "content-length",
       ),
     );
 
-  const hasKnownTotal =
+  const knownLength =
     Number.isFinite(
-      headerTotal,
+      contentLength,
     ) &&
-    headerTotal > 0;
+    contentLength > 0
+      ? contentLength
+      : null;
 
-  const total =
-    hasKnownTotal
-      ? headerTotal
-      : EXPECTED_MODEL_BYTES;
+  const expectedTotal =
+    knownLength ??
+    EXPECTED_MODEL_BYTES;
 
   if (
     !response.body
@@ -137,7 +139,7 @@ async function readResponseBytes(
       bytes.byteLength,
 
       Math.max(
-        total,
+        expectedTotal,
         bytes.byteLength,
       ),
     );
@@ -148,62 +150,46 @@ async function readResponseBytes(
   const reader =
     response.body.getReader();
 
-  const preallocated =
-    hasKnownTotal
-      ? new Uint8Array(
-          headerTotal,
-        )
-      : null;
-
   const chunks:
     Uint8Array[] = [];
 
-  let received = 0;
+  let received =
+    0;
 
   try {
     while (true) {
       options.checkCancelled();
 
-      const result =
+      const {
+        done,
+        value,
+      } =
         await reader.read();
 
       if (
-        result.done
+        done
       ) {
         break;
       }
 
       if (
-        !result.value
-          ?.byteLength
+        !value?.byteLength
       ) {
         continue;
       }
 
-      if (
-        preallocated &&
-        received +
-          result.value.byteLength <=
-          preallocated.byteLength
-      ) {
-        preallocated.set(
-          result.value,
-          received,
-        );
-      } else {
-        chunks.push(
-          result.value,
-        );
-      }
+      chunks.push(
+        value,
+      );
 
       received +=
-        result.value.byteLength;
+        value.byteLength;
 
       options.onResourceProgress?.(
         received,
 
         Math.max(
-          total,
+          expectedTotal,
           received,
         ),
       );
@@ -212,66 +198,32 @@ async function readResponseBytes(
     reader.releaseLock();
   }
 
-  let bytes:
-    Uint8Array;
+  const bytes =
+    new Uint8Array(
+      received,
+    );
 
-  if (
-    preallocated &&
-    chunks.length === 0 &&
-    received ===
-      preallocated.byteLength
+  let offset =
+    0;
+
+  for (
+    const chunk of
+    chunks
   ) {
-    bytes =
-      preallocated;
-  } else {
-    bytes =
-      new Uint8Array(
-        received,
-      );
+    bytes.set(
+      chunk,
+      offset,
+    );
 
-    let offset = 0;
-
-    if (
-      preallocated
-    ) {
-      const copied =
-        Math.min(
-          received,
-          preallocated.byteLength,
-        );
-
-      bytes.set(
-        preallocated.subarray(
-          0,
-          copied,
-        ),
-
-        0,
-      );
-
-      offset =
-        copied;
-    }
-
-    for (
-      const chunk of
-      chunks
-    ) {
-      bytes.set(
-        chunk,
-        offset,
-      );
-
-      offset +=
-        chunk.byteLength;
-    }
+    offset +=
+      chunk.byteLength;
   }
 
   options.onResourceProgress?.(
     received,
 
     Math.max(
-      total,
+      expectedTotal,
       received,
     ),
   );
@@ -282,8 +234,7 @@ async function readResponseBytes(
 async function loadModelBytes(
   options: Pick<
     LamaInpaintOptions,
-    | "checkCancelled"
-    | "onResourceProgress"
+    "checkCancelled" | "onResourceProgress"
   >,
 ): Promise<Uint8Array> {
   const cache =
@@ -295,7 +246,7 @@ async function loadModelBytes(
     try {
       const cached =
         await cache.match(
-          MODEL_CACHE_KEY,
+          MODEL_URL,
         );
 
       if (
@@ -308,97 +259,74 @@ async function loadModelBytes(
       }
     } catch {
       /*
-       * A corrupt or unavailable browser cache
-       * must not block a network retry.
+       * Ignore a corrupt browser cache and retry from
+       * the network.
        */
     }
   }
 
-  let lastError:
-    unknown = null;
+  options.checkCancelled();
 
-  for (
-    const source of
-    MODEL_SOURCES
+  const response =
+    await fetch(
+      MODEL_URL,
+
+      {
+        cache:
+          "force-cache",
+
+        credentials:
+          "omit",
+
+        mode:
+          "cors",
+
+        redirect:
+          "follow",
+      },
+    );
+
+  if (
+    !response.ok
   ) {
-    options.checkCancelled();
-
-    try {
-      const response =
-  await fetch(
-    source,
-
-    {
-      cache:
-        "force-cache",
-
-      credentials:
-        "omit",
-
-      mode:
-        "cors",
-
-      redirect:
-        "follow",
-    },
-  );
-      if (
-        !isHttpSuccess(
-          response,
-        )
-      ) {
-        throw new Error(
-          `model-http-${response.status}`,
-        );
-      }
-
-      const cacheResponse =
-        response.clone();
-
-      const bytes =
-        await readResponseBytes(
-          response,
-          options,
-        );
-
-      if (
-        bytes.byteLength <
-        1_000_000
-      ) {
-        throw new Error(
-          "model-response-too-small",
-        );
-      }
-
-      if (
-        cache
-      ) {
-        void cache
-          .put(
-            MODEL_CACHE_KEY,
-            cacheResponse,
-          )
-          .catch(
-            () =>
-              undefined,
-          );
-      }
-
-      return bytes;
-    } catch (
-      error
-    ) {
-      lastError =
-        error;
-    }
+    throw new Error(
+      `inpainting-model-http-${response.status}`,
+    );
   }
 
-  throw lastError instanceof
-    Error
-    ? lastError
-    : new Error(
-        "inpainting-model-load-failed",
+  const cacheCopy =
+    response.clone();
+
+  const bytes =
+    await readResponseBytes(
+      response,
+      options,
+    );
+
+  if (
+    bytes.byteLength <
+    1_000_000
+  ) {
+    throw new Error(
+      "inpainting-model-response-too-small",
+    );
+  }
+
+  if (
+    cache
+  ) {
+    void cache
+      .put(
+        MODEL_URL,
+        cacheCopy,
+      )
+      .catch(
+        () =>
+          undefined,
       );
+  }
+
+  return bytes;
 }
 
 async function createSession(
@@ -414,37 +342,51 @@ async function createSession(
       "onnxruntime-web"
     );
 
-  const hardwareConcurrency =
+  const cores =
     typeof navigator ===
     "undefined"
       ? 2
       : navigator.hardwareConcurrency ||
         2;
 
-  const canUseWasmThreads =
+  const canUseThreads =
     typeof crossOriginIsolated !==
       "undefined" &&
     crossOriginIsolated;
 
+  ort.env.debug =
+    false;
+
+  /*
+   * Suppress harmless model-cleanup warnings such as
+   * CleanUnusedInitializersAndNodeArgs.
+   */
+  ort.env.logLevel =
+    "error";
+
   ort.env.wasm.numThreads =
-    canUseWasmThreads
+    canUseThreads
       ? Math.max(
           1,
 
           Math.min(
             4,
-            hardwareConcurrency,
+            cores,
           ),
         )
       : 1;
 
   /*
-   * Keep the image worker responsive while WASM inference runs.
-   * Without the proxy worker, session.run() may block the worker
-   * event loop long enough for the main-thread watchdog to end it.
+   * Sharpixa already executes this module inside
+   * imageProcessor.worker.ts.
+   *
+   * Do not enable ONNX Runtime's proxy worker here.
+   * That would create a second Blob worker, which can
+   * fail or stall after deployment when the production
+   * Content Security Policy is active.
    */
   ort.env.wasm.proxy =
-    true;
+    false;
 
   options.onStageProgress?.(
     "loading-model",
@@ -531,17 +473,10 @@ function getSession(
 function createExtendedSquare(
   crop: ImageData,
 ): {
-  canvas:
-    OffscreenCanvas;
-
-  offsetX:
-    number;
-
-  offsetY:
-    number;
-
-  side:
-    number;
+  canvas: OffscreenCanvas;
+  offsetX: number;
+  offsetY: number;
+  side: number;
 } {
   const cropCanvas =
     createOffscreenCanvas(
@@ -630,13 +565,16 @@ function createExtendedSquare(
     context.drawImage(
       cropCanvas,
 
-      crop.width - 1,
+      crop.width -
+        1,
+
       0,
       1,
       crop.height,
 
       offsetX +
         crop.width,
+
       offsetY,
 
       side -
@@ -668,11 +606,15 @@ function createExtendedSquare(
       cropCanvas,
 
       0,
-      crop.height - 1,
+
+      crop.height -
+        1,
+
       crop.width,
       1,
 
       offsetX,
+
       offsetY +
         crop.height,
 
@@ -705,7 +647,9 @@ function createExtendedSquare(
     context.drawImage(
       cropCanvas,
 
-      crop.width - 1,
+      crop.width -
+        1,
+
       0,
       1,
       1,
@@ -726,7 +670,10 @@ function createExtendedSquare(
       cropCanvas,
 
       0,
-      crop.height - 1,
+
+      crop.height -
+        1,
+
       1,
       1,
 
@@ -745,8 +692,12 @@ function createExtendedSquare(
     context.drawImage(
       cropCanvas,
 
-      crop.width - 1,
-      crop.height - 1,
+      crop.width -
+        1,
+
+      crop.height -
+        1,
+
       1,
       1,
 
@@ -779,8 +730,7 @@ function createExtendedSquare(
 }
 
 function createModelImageTensor(
-  squareCanvas:
-    OffscreenCanvas,
+  canvas: OffscreenCanvas,
 ): Float32Array {
   const modelCanvas =
     createOffscreenCanvas(
@@ -801,14 +751,16 @@ function createModelImageTensor(
     "high";
 
   context.drawImage(
-    squareCanvas,
+    canvas,
+
     0,
     0,
+
     MODEL_SIZE,
     MODEL_SIZE,
   );
 
-  const data =
+  const rgba =
     context.getImageData(
       0,
       0,
@@ -828,23 +780,30 @@ function createModelImageTensor(
 
   for (
     let pixel = 0;
-    pixel < plane;
+
+    pixel <
+    plane;
+
     pixel++
   ) {
-    const sourceIndex =
+    const source =
       pixel *
       4;
 
-    tensor[pixel] =
-      data[sourceIndex] /
+    tensor[
+      pixel
+    ] =
+      rgba[
+        source
+      ] /
       255;
 
     tensor[
       plane +
         pixel
     ] =
-      data[
-        sourceIndex +
+      rgba[
+        source +
           1
       ] /
       255;
@@ -854,8 +813,8 @@ function createModelImageTensor(
         2 +
         pixel
     ] =
-      data[
-        sourceIndex +
+      rgba[
+        source +
           2
       ] /
       255;
@@ -869,17 +828,10 @@ function createModelImageTensor(
 }
 
 function createModelMaskTensor(
-  plan:
-    InpaintPlan,
-
-  squareSide:
-    number,
-
-  offsetX:
-    number,
-
-  offsetY:
-    number,
+  plan: InpaintPlan,
+  squareSide: number,
+  offsetX: number,
+  offsetY: number,
 ): Float32Array {
   const tensor =
     new Float32Array(
@@ -887,24 +839,20 @@ function createModelMaskTensor(
         MODEL_SIZE,
     );
 
-  /*
-   * Forward-map every selected source pixel.
-   *
-   * A nearest-neighbour destination lookup may make a thin text
-   * stroke disappear when a large crop is reduced to 512 px.
-   * Forward mapping ensures every selected stroke remains present
-   * in the binary model mask.
-   */
   for (
     let sourceY = 0;
+
     sourceY <
     plan.height;
+
     sourceY++
   ) {
     for (
       let sourceX = 0;
+
       sourceX <
       plan.width;
+
       sourceX++
     ) {
       const sourcePixel =
@@ -928,7 +876,7 @@ function createModelMaskTensor(
         offsetY +
         sourceY;
 
-      const modelStartX =
+      const startX =
         Math.max(
           0,
 
@@ -946,9 +894,9 @@ function createModelMaskTensor(
           ),
         );
 
-      const modelEndX =
+      const endX =
         Math.max(
-          modelStartX,
+          startX,
 
           Math.min(
             MODEL_SIZE -
@@ -968,7 +916,7 @@ function createModelMaskTensor(
           ),
         );
 
-      const modelStartY =
+      const startY =
         Math.max(
           0,
 
@@ -986,9 +934,9 @@ function createModelMaskTensor(
           ),
         );
 
-      const modelEndY =
+      const endY =
         Math.max(
-          modelStartY,
+          startY,
 
           Math.min(
             MODEL_SIZE -
@@ -1010,19 +958,19 @@ function createModelMaskTensor(
 
       for (
         let modelY =
-          modelStartY;
+          startY;
 
         modelY <=
-        modelEndY;
+        endY;
 
         modelY++
       ) {
         for (
           let modelX =
-            modelStartX;
+            startX;
 
           modelX <=
-          modelEndX;
+          endX;
 
           modelX++
         ) {
@@ -1040,15 +988,14 @@ function createModelMaskTensor(
 }
 
 function tensorOutputToCanvas(
-  outputData:
-    ArrayLike<number>,
+  output: ArrayLike<number>,
 ): OffscreenCanvas {
   const plane =
     MODEL_SIZE *
     MODEL_SIZE;
 
   if (
-    outputData.length <
+    output.length <
     plane *
       3
   ) {
@@ -1065,39 +1012,42 @@ function tensorOutputToCanvas(
 
   for (
     let pixel = 0;
-    pixel < plane;
+
+    pixel <
+    plane;
+
     pixel++
   ) {
-    const outputIndex =
+    const target =
       pixel *
       4;
 
     rgba[
-      outputIndex
+      target
     ] =
       clampByte(
-        outputData[
+        output[
           pixel
         ],
       );
 
     rgba[
-      outputIndex +
+      target +
         1
     ] =
       clampByte(
-        outputData[
+        output[
           plane +
             pixel
         ],
       );
 
     rgba[
-      outputIndex +
+      target +
         2
     ] =
       clampByte(
-        outputData[
+        output[
           plane *
             2 +
             pixel
@@ -1105,7 +1055,7 @@ function tensorOutputToCanvas(
       );
 
     rgba[
-      outputIndex +
+      target +
         3
     ] = 255;
   }
@@ -1116,13 +1066,10 @@ function tensorOutputToCanvas(
       MODEL_SIZE,
     );
 
-  const context =
-    getOffscreenContext(
-      canvas,
-      true,
-    );
-
-  context.putImageData(
+  getOffscreenContext(
+    canvas,
+    true,
+  ).putImageData(
     new ImageData(
       rgba,
       MODEL_SIZE,
@@ -1157,14 +1104,18 @@ function findBoundaryCorrection(
 
   for (
     let y = 0;
+
     y <
     plan.height;
+
     y++
   ) {
     for (
       let x = 0;
+
       x <
       plan.width;
+
       x++
     ) {
       const pixel =
@@ -1184,17 +1135,16 @@ function findBoundaryCorrection(
         false;
 
       for (
-        let offsetY = -1;
+        let dy = -1;
 
-        offsetY <=
-          1 &&
+        dy <= 1 &&
         !touchesMask;
 
-        offsetY++
+        dy++
       ) {
         const nextY =
           y +
-          offsetY;
+          dy;
 
         if (
           nextY < 0 ||
@@ -1205,16 +1155,15 @@ function findBoundaryCorrection(
         }
 
         for (
-          let offsetX = -1;
+          let dx = -1;
 
-          offsetX <=
-          1;
+          dx <= 1;
 
-          offsetX++
+          dx++
         ) {
           const nextX =
             x +
-            offsetX;
+            dx;
 
           if (
             nextX < 0 ||
@@ -1367,23 +1316,13 @@ function compositeGeneratedCrop(
       continue;
     }
 
-    /*
-     * Every pixel in plan.mask is intentional reconstruction territory,
-     * including the one-pixel anti-halo ring.
-     *
-     * Blending the original image back here reintroduced translucent
-     * watermark edges and made the circular selection shape visible.
-     *
-     * Pixels outside plan.mask are never touched.
-     */
-    const strength =
-      1;
-
     const index =
       pixel *
       4;
 
-    const generatedRed =
+    result.data[
+      index
+    ] =
       clampByte(
         generated.data[
           index
@@ -1393,58 +1332,18 @@ function compositeGeneratedCrop(
           ],
       );
 
-    const generatedGreen =
-      clampByte(
-        generated.data[
-          index +
-            1
-        ] +
-          correction[
-            1
-          ],
-      );
-
-    const generatedBlue =
-      clampByte(
-        generated.data[
-          index +
-            2
-        ] +
-          correction[
-            2
-          ],
-      );
-
-    result.data[
-      index
-    ] =
-      clampByte(
-        original.data[
-          index
-        ] *
-          (
-            1 -
-            strength
-          ) +
-          generatedRed *
-            strength,
-      );
-
     result.data[
       index +
         1
     ] =
       clampByte(
-        original.data[
+        generated.data[
           index +
             1
-        ] *
-          (
-            1 -
-            strength
-          ) +
-          generatedGreen *
-            strength,
+        ] +
+          correction[
+            1
+          ],
       );
 
     result.data[
@@ -1452,21 +1351,18 @@ function compositeGeneratedCrop(
         2
     ] =
       clampByte(
-        original.data[
+        generated.data[
           index +
             2
-        ] *
-          (
-            1 -
-            strength
-          ) +
-          generatedBlue *
-            strength,
+        ] +
+          correction[
+            2
+          ],
       );
 
     /*
-     * Removal reconstructs hidden RGB pixels.
-     * It does not create a transparent hole in an opaque image.
+     * Reconstruct hidden RGB pixels. Do not create a
+     * transparent hole in an otherwise opaque image.
      */
     result.data[
       index +
@@ -1530,6 +1426,29 @@ export async function applyLamaInpaint(
     | OffscreenCanvas
     | null = null;
 
+  let imageTensor:
+    | InstanceType<
+        OrtModule[
+          "Tensor"
+        ]
+      >
+    | null = null;
+
+  let maskTensor:
+    | InstanceType<
+        OrtModule[
+          "Tensor"
+        ]
+      >
+    | null = null;
+
+  let outputValues:
+    | Record<
+        string,
+        DisposableValue
+      >
+    | null = null;
+
   try {
     const imageData =
       createModelImageTensor(
@@ -1551,7 +1470,7 @@ export async function applyLamaInpaint(
       0.18,
     );
 
-    const imageTensor =
+    imageTensor =
       new loaded.ort.Tensor(
         "float32",
 
@@ -1565,7 +1484,7 @@ export async function applyLamaInpaint(
         ],
       );
 
-    const maskTensor =
+    maskTensor =
       new loaded.ort.Tensor(
         "float32",
 
@@ -1620,16 +1539,40 @@ export async function applyLamaInpaint(
       );
     }
 
-    const output =
-      await loaded.session.run(
-        {
-          [imageInput]:
-            imageTensor,
+    try {
+      outputValues =
+        (
+          await loaded.session.run(
+            {
+              [imageInput]:
+                imageTensor,
 
-          [maskInput]:
-            maskTensor,
-        },
+              [maskInput]:
+                maskTensor,
+            },
+          )
+        ) as Record<
+          string,
+          DisposableValue
+        >;
+    } catch (
+      error
+    ) {
+      await invalidateSession(
+        loaded,
       );
+
+      const detail =
+        error instanceof
+          Error &&
+        error.message
+          ? error.message
+          : "unknown-runtime-error";
+
+      throw new Error(
+        `inpainting-inference-failed:${detail}`,
+      );
+    }
 
     options.checkCancelled();
 
@@ -1656,13 +1599,13 @@ export async function applyLamaInpaint(
 
     const outputTensor =
       outputName
-        ? output[
+        ? outputValues[
             outputName
           ]
         : undefined;
 
     if (
-      !outputTensor
+      !outputTensor?.data
     ) {
       throw new Error(
         "inpainting-model-output-missing",
@@ -1671,8 +1614,7 @@ export async function applyLamaInpaint(
 
     outputCanvas =
       tensorOutputToCanvas(
-        outputTensor.data as
-          ArrayLike<number>,
+        outputTensor.data,
       );
 
     generatedSquare =
@@ -1723,7 +1665,6 @@ export async function applyLamaInpaint(
 
     options.context.putImageData(
       composited,
-
       options.plan.x,
       options.plan.y,
     );
@@ -1733,6 +1674,29 @@ export async function applyLamaInpaint(
       1,
     );
   } finally {
+    disposeValue(
+      imageTensor,
+    );
+
+    disposeValue(
+      maskTensor,
+    );
+
+    if (
+      outputValues
+    ) {
+      for (
+        const value of
+        Object.values(
+          outputValues,
+        )
+      ) {
+        disposeValue(
+          value,
+        );
+      }
+    }
+
     releaseCanvas(
       square.canvas,
     );
