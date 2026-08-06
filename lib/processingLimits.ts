@@ -99,6 +99,21 @@ export const LOW_MEMORY_MAX_PROCESSING_PIXELS =
 export const HIGH_MEMORY_MAX_PROCESSING_PIXELS =
   10_000_000;
 
+/**
+ * Browser ONNX inference is much more memory hungry than ordinary canvas
+ * filters. Keep the neural-network working image deliberately smaller than
+ * the final PNG, then restore the alpha mask onto the browser-safe output
+ * dimensions after inference.
+ */
+export const LOW_MEMORY_MAX_BACKGROUND_INFERENCE_PIXELS =
+  1_250_000;
+
+export const DEFAULT_MAX_BACKGROUND_INFERENCE_PIXELS =
+  2_500_000;
+
+export const HIGH_MEMORY_MAX_BACKGROUND_INFERENCE_PIXELS =
+  4_000_000;
+
 export const DEFAULT_MAX_OUTPUT_PIXELS =
   12_000_000;
 
@@ -695,11 +710,13 @@ export function createImageProcessingPlan(
         ),
     );
 
+  /*
+   * Automatic background removal no longer forces the exported PNG down to
+   * the inference resolution. The worker runs the model on plan.working and
+   * applies the returned alpha matte to plan.output afterwards.
+   */
   const operationPixelLimit =
-    operation ===
-    "automatic-background"
-      ? safetyProfile.maxProcessingPixels
-      : safetyProfile.maxOutputPixels;
+    safetyProfile.maxOutputPixels;
 
   const maxOutputPixels =
     Math.max(
@@ -719,9 +736,22 @@ export function createImageProcessingPlan(
       maxOutputPixels,
     );
 
+  const backgroundInferenceLimit =
+    safetyProfile.tier ===
+    "low"
+      ? LOW_MEMORY_MAX_BACKGROUND_INFERENCE_PIXELS
+      : safetyProfile.tier ===
+          "high"
+        ? HIGH_MEMORY_MAX_BACKGROUND_INFERENCE_PIXELS
+        : DEFAULT_MAX_BACKGROUND_INFERENCE_PIXELS;
+
   const workingPixelLimit =
     Math.min(
-      safetyProfile.maxProcessingPixels,
+      operation ===
+      "automatic-background"
+        ? backgroundInferenceLimit
+        : safetyProfile.maxProcessingPixels,
+
       getPixelCount(
         output,
       ),

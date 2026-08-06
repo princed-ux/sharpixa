@@ -68,13 +68,13 @@ export const BACKGROUND_PROGRESS_PROFILE: ProgressProfile = {
   preparing: { start: 0, end: 5 },
   "loading-model": { start: 5, end: 42 },
   decoding: { start: 42, end: 52 },
-  "analyzing-subject": { start: 52, end: 88 },
+  "analyzing-subject": { start: 52, end: 84 },
   "reading-mask": EMPTY_RANGE,
   "processing-tiles": EMPTY_RANGE,
   "applying-enhancement": EMPTY_RANGE,
-  "resizing-output": EMPTY_RANGE,
+  "resizing-output": { start: 84, end: 92 },
   "processing-video": EMPTY_RANGE,
-  "encoding-output": { start: 88, end: 98 },
+  "encoding-output": { start: 92, end: 98 },
   finalizing: { start: 98, end: 99 },
 };
 
@@ -94,15 +94,15 @@ export const ENHANCE_PROGRESS_PROFILE: ProgressProfile = {
 
 export const MASK_PROGRESS_PROFILE: ProgressProfile = {
   preparing: { start: 0, end: 5 },
-  "loading-model": EMPTY_RANGE,
-  decoding: { start: 5, end: 15 },
+  decoding: { start: 5, end: 13 },
   "analyzing-subject": EMPTY_RANGE,
-  "reading-mask": { start: 15, end: 30 },
-  "processing-tiles": { start: 30, end: 88 },
+  "reading-mask": { start: 13, end: 22 },
+  "loading-model": { start: 22, end: 48 },
+  "processing-tiles": { start: 48, end: 90 },
   "applying-enhancement": EMPTY_RANGE,
   "resizing-output": EMPTY_RANGE,
   "processing-video": EMPTY_RANGE,
-  "encoding-output": { start: 88, end: 98 },
+  "encoding-output": { start: 90, end: 98 },
   finalizing: { start: 98, end: 99 },
 };
 

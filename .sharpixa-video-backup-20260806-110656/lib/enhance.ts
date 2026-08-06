@@ -104,46 +104,20 @@ export function readImageDimensions(
   });
 }
 
-export interface VideoInspection {
-  metadata: VideoMetadata;
-  poster: Blob;
-  browserPreviewSupported: boolean;
-  codec: string | null;
-  mimeType: string | null;
-}
-
-let mediaModulePromise:
-  | Promise<typeof import("mediabunny")>
-  | null = null;
-
-function getMediaModule(): Promise<typeof import("mediabunny")> {
-  if (!mediaModulePromise) {
-    mediaModulePromise = import("mediabunny").catch((error: unknown) => {
-      mediaModulePromise = null;
-      throw error;
-    });
-  }
-
-  return mediaModulePromise;
-}
-
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) {
-    throw createAbortError();
-  }
-}
-
-function canPreviewVideoElement(
+export function readVideoMetadata(
   url: string,
   signal?: AbortSignal,
-): Promise<boolean> {
+): Promise<VideoMetadata> {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
     let settled = false;
-
     const timeout = window.setTimeout(() => {
-      finish(false);
-    }, 8_000);
+      finish(
+        new Error(
+          "Video metadata could not be read. Try MP4 or WEBM in current Chrome or Edge.",
+        ),
+      );
+    }, 15_000);
 
     const cleanup = () => {
       window.clearTimeout(timeout);
@@ -154,40 +128,56 @@ function canPreviewVideoElement(
       video.removeAttribute("src");
       video.load();
     };
-
-    const finish = (supported: boolean) => {
+    const finish = (
+      error: Error | null,
+      metadata?: VideoMetadata,
+    ) => {
       if (settled) {
         return;
       }
 
       settled = true;
       cleanup();
-      resolve(supported);
+
+      if (error) {
+        reject(error);
+      } else if (metadata) {
+        resolve(metadata);
+      }
     };
-
     const onAbort = () => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      cleanup();
-      reject(createAbortError());
+      finish(createAbortError());
     };
 
     video.preload = "metadata";
     video.muted = true;
     video.playsInline = true;
     video.onloadedmetadata = () => {
+      const metadata = {
+        width: video.videoWidth,
+        height: video.videoHeight,
+        duration: video.duration,
+      };
+
+      if (
+        !metadata.width ||
+        !metadata.height ||
+        !Number.isFinite(metadata.duration) ||
+        metadata.duration <= 0
+      ) {
+        finish(new Error("The video has invalid or incomplete metadata."));
+        return;
+      }
+
+      finish(null, metadata);
+    };
+    video.onerror = () => {
       finish(
-        video.videoWidth > 0 &&
-          video.videoHeight > 0 &&
-          Number.isFinite(video.duration) &&
-          video.duration > 0,
+        new Error(
+          "The video could not be decoded. Try MP4 or WEBM in current Chrome or Edge.",
+        ),
       );
     };
-    video.onerror = () => finish(false);
-
     signal?.addEventListener("abort", onAbort, { once: true });
 
     if (signal?.aborted) {
@@ -200,160 +190,98 @@ function canPreviewVideoElement(
 }
 
 /**
- * Reads the container and track metadata with Mediabunny instead of using the
- * HTML <video> element as the source of truth. This lets Sharpixa accept
- * decodable MOV, MKV, M4V and transport-stream files even when the browser's
- * native media element does not recognize their container.
+ * Captures one preflight-limited frame for the brush editor. This DOM-only
+ * operation performs no pixel loop and releases the media element immediately.
  */
-export async function inspectVideoFile(
-  file: File,
-  objectUrl: string,
+export function captureVideoFrame(
+  videoUrl: string,
   signal?: AbortSignal,
-): Promise<VideoInspection> {
-  throwIfAborted(signal);
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      finish(new Error("Video frame capture timed out."));
+    }, 15_000);
 
-  const media = await getMediaModule();
-  throwIfAborted(signal);
-
-  const input = new media.Input({
-    source: new media.BlobSource(file),
-    formats: media.ALL_FORMATS,
-  });
-
-  let sample: InstanceType<typeof media.VideoSample> | null = null;
-  let canvas: HTMLCanvasElement | null = null;
-
-  const abortInput = () => {
-    try {
-      input.dispose();
-    } catch {
-      // The input may already have been released by the normal cleanup path.
-    }
-  };
-
-  signal?.addEventListener("abort", abortInput, { once: true });
-
-  try {
-    if (!(await input.canRead())) {
-      throw new Error("unsupported-video-container");
-    }
-
-    throwIfAborted(signal);
-
-    const videoTrack = await input.getPrimaryVideoTrack();
-
-    if (!videoTrack) {
-      throw new Error("video-track-missing");
-    }
-
-    const [width, height, metadataDuration, codec, mimeType, canDecode] =
-      await Promise.all([
-        videoTrack.getDisplayWidth(),
-        videoTrack.getDisplayHeight(),
-        input.getDurationFromMetadata([videoTrack], {
-          skipLiveWait: true,
-        }),
-        videoTrack.getCodec(),
-        input.getMimeType().catch(() => null),
-        videoTrack.canDecode(),
-      ]);
-
-    throwIfAborted(signal);
-
-    if (!canDecode) {
-      throw new Error(
-        `unsupported-video-codec:${codec ?? "unknown"}`,
-      );
-    }
-
-    const duration =
-      typeof metadataDuration === "number" &&
-      Number.isFinite(metadataDuration) &&
-      metadataDuration > 0
-        ? metadataDuration
-        : await videoTrack.computeDuration({ skipLiveWait: true });
-
-    if (
-      !Number.isFinite(width) ||
-      !Number.isFinite(height) ||
-      !Number.isFinite(duration) ||
-      width <= 0 ||
-      height <= 0 ||
-      duration <= 0
-    ) {
-      throw new Error("invalid-video-metadata");
-    }
-
-    throwIfAborted(signal);
-
-    const firstTimestamp = await videoTrack.getFirstTimestamp();
-    const safeStart = Math.max(0, firstTimestamp);
-    const posterTimestamp = Math.min(
-      Math.max(0, duration - 0.001),
-      safeStart + Math.min(0.08, Math.max(0.01, duration / 20)),
-    );
-
-    const sink = new media.VideoSampleSink(videoTrack);
-    sample =
-      (await sink.getSample(posterTimestamp, {
-        skipLiveWait: true,
-      })) ??
-      (await sink.getSample(safeStart, {
-        skipLiveWait: true,
-      }));
-
-    if (!sample) {
-      throw new Error("video-poster-frame-missing");
-    }
-
-    throwIfAborted(signal);
-
-    canvas = createCanvas(width, height);
-    const context = getContext(canvas);
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = "high";
-    sample.draw(context, 0, 0, width, height);
-
-    const poster = await canvasToBlob(canvas, "image/jpeg");
-    throwIfAborted(signal);
-
-    const browserPreviewSupported = await canPreviewVideoElement(
-      objectUrl,
-      signal,
-    );
-
-    return {
-      metadata: {
-        width,
-        height,
-        duration,
-      },
-      poster,
-      browserPreviewSupported,
-      codec,
-      mimeType,
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      video.onloadedmetadata = null;
+      video.onseeked = null;
+      video.onerror = null;
+      signal?.removeEventListener("abort", onAbort);
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
     };
-  } catch (error) {
+    const finish = (error: Error | null, blob?: Blob) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+
+      if (error) {
+        reject(error);
+      } else if (blob) {
+        resolve(blob);
+      }
+    };
+    const onAbort = () => {
+      finish(createAbortError());
+    };
+
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.onloadedmetadata = () => {
+      video.onseeked = () => {
+        try {
+          const canvas = createCanvas(video.videoWidth, video.videoHeight);
+          const context = getContext(canvas);
+          context.drawImage(
+            video,
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+          );
+          void canvasToBlob(canvas, "image/jpeg")
+            .then((blob) => finish(null, blob))
+            .catch((error: unknown) => {
+              finish(
+                error instanceof Error
+                  ? error
+                  : new Error("The video frame could not be encoded."),
+              );
+            })
+            .finally(() => {
+              canvas.width = 1;
+              canvas.height = 1;
+            });
+        } catch (error) {
+          finish(
+            error instanceof Error
+              ? error
+              : new Error("The video frame could not be captured."),
+          );
+        }
+      };
+      video.currentTime = Math.min(0.05, video.duration || 0.05);
+    };
+    video.onerror = () => {
+      finish(new Error("The video frame could not be decoded."));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     if (signal?.aborted) {
-      throw createAbortError();
+      onAbort();
+      return;
     }
 
-    throw error;
-  } finally {
-    signal?.removeEventListener("abort", abortInput);
-    sample?.close();
-
-    if (canvas) {
-      canvas.width = 1;
-      canvas.height = 1;
-    }
-
-    try {
-      input.dispose();
-    } catch {
-      // Ignore duplicate/disposed cleanup.
-    }
-  }
+    video.src = videoUrl;
+  });
 }
 
 export function formatBytes(bytes: number): string {

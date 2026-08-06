@@ -45,6 +45,15 @@ const NORMAL_INACTIVITY_TIMEOUT_MS = 150_000;
 const BACKGROUND_INACTIVITY_TIMEOUT_MS =
   12 * 60_000;
 
+/**
+ * Neural inpainting can be silent while ONNX executes. The worker now uses
+ * ONNX Runtime's proxy worker, but this larger window prevents a false
+ * watchdog failure on browsers that need longer to initialize it. Small
+ * watermark selections bypass the neural model and use the fast local engine.
+ */
+const INPAINT_INACTIVITY_TIMEOUT_MS =
+  4 * 60_000;
+
 const NORMAL_OVERALL_TIMEOUT_MS =
   10 * 60_000;
 
@@ -53,6 +62,9 @@ const BACKGROUND_MIN_OVERALL_TIMEOUT_MS =
 
 const BACKGROUND_MAX_OVERALL_TIMEOUT_MS =
   30 * 60_000;
+
+const INPAINT_OVERALL_TIMEOUT_MS =
+  8 * 60_000;
 
 const CANCEL_GRACE_MS = 1_500;
 
@@ -65,9 +77,23 @@ function isAutomaticBackground(
   );
 }
 
+function isModelInpaint(
+  operation: ImageOperation,
+): boolean {
+  return operation === "inpaint";
+}
+
 function getOverallTimeoutMs(
   request: ImageWorkerProcessRequest,
 ): number {
+  if (
+    isModelInpaint(
+      request.operation,
+    )
+  ) {
+    return INPAINT_OVERALL_TIMEOUT_MS;
+  }
+
   if (
     !isAutomaticBackground(
       request.operation,
@@ -115,11 +141,23 @@ function getOverallTimeoutMs(
 function getInactivityTimeoutMs(
   operation: ImageOperation,
 ): number {
-  return isAutomaticBackground(
-    operation,
-  )
-    ? BACKGROUND_INACTIVITY_TIMEOUT_MS
-    : NORMAL_INACTIVITY_TIMEOUT_MS;
+  if (
+    isAutomaticBackground(
+      operation,
+    )
+  ) {
+    return BACKGROUND_INACTIVITY_TIMEOUT_MS;
+  }
+
+  if (
+    isModelInpaint(
+      operation,
+    )
+  ) {
+    return INPAINT_INACTIVITY_TIMEOUT_MS;
+  }
+
+  return NORMAL_INACTIVITY_TIMEOUT_MS;
 }
 
 function createStartupError(): WorkerProcessingError {
@@ -142,6 +180,18 @@ function createInactivityError(
       "model-load-failed",
 
       "Automatic background removal remained silent for too long while downloading or running the browser model. Reload the page and retry; the model may still be cached after the first attempt.",
+    );
+  }
+
+  if (
+    isModelInpaint(
+      operation,
+    )
+  ) {
+    return new WorkerProcessingError(
+      "processing-failed",
+
+      "The reconstruction engine did not respond within its safety window. Retry the selection; small watermark selections will use the fast local engine automatically.",
     );
   }
 

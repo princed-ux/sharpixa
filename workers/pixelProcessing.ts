@@ -1238,12 +1238,16 @@ export async function analyzeMask(
   };
 }
 
-const INPAINT_BINARY_THRESHOLD = 8;
-const INPAINT_DILATION = 2;
+const INPAINT_BINARY_THRESHOLD = 4;
+const INPAINT_DILATION = 1;
+const INPAINT_RING_COVERAGE = 192;
 const INPAINT_MIN_CONTEXT_PADDING = 48;
 const INPAINT_MAX_CONTEXT_PADDING = 176;
 const INPAINT_MAX_BOUNDARY_SAMPLES = 1024;
 const INPAINT_MAX_DONOR_CANDIDATES = 128;
+const INPAINT_MIN_PATCH_SELECTION_PIXELS = 24_000;
+const INPAINT_MIN_PATCH_DEPTH = 10;
+const INPAINT_MAX_ACCEPTABLE_DONOR_SCORE = 34;
 
 const INPAINT_DIRECTIONS = [
   [-1, 0],
@@ -1364,10 +1368,10 @@ async function buildMaskData(
     ) {
       mask[pixel] = 1;
 
-      coverage[pixel] =
-        alpha >= MASK_ALPHA_THRESHOLD
-          ? 255
-          : alpha * 4;
+      // Every visible painted pixel is a full reconstruction target.
+      // Alpha-weighted core coverage used to blend parts of translucent
+      // watermarks back into the output and leave a visible halo.
+      coverage[pixel] = 255;
     }
 
     if (
@@ -1390,9 +1394,7 @@ async function buildMaskData(
       new Uint8Array(mask);
 
     const ringCoverage =
-      pass === 0
-        ? 168
-        : 72;
+      INPAINT_RING_COVERAGE;
 
     for (
       let y = 0;
@@ -2427,6 +2429,7 @@ function gradient(
 
 interface DonorChoice {
   candidate: number;
+  score: number;
   redCorrection: number;
   greenCorrection: number;
   blueCorrection: number;
@@ -2436,13 +2439,7 @@ function scoreDonor(
   pixels: Uint8ClampedArray,
   plan: InpaintPlan,
   candidate: number,
-):
-  | (
-      DonorChoice & {
-        score: number;
-      }
-    )
-  | null {
+): DonorChoice | null {
   const dx =
     plan.donorOffsets[
       candidate * 2
@@ -2656,11 +2653,7 @@ function chooseDonor(
   }
 
   let best:
-    | (
-        DonorChoice & {
-          score: number;
-        }
-      )
+    | DonorChoice
     | null = null;
 
   for (
@@ -2695,6 +2688,55 @@ function chooseDonor(
     best.candidate;
 
   return best;
+}
+
+/**
+ * A single translated donor patch is useful for a genuinely large object on
+ * repeatable texture, but it is the wrong tool for tiny logos and translucent
+ * watermarks. On small or thin selections it can copy a dark nearby edge over
+ * the whole mask, producing the obvious circular/rectangular blotch seen in
+ * failed results. Those selections are reconstructed by directional boundary
+ * interpolation instead.
+ */
+function shouldUsePatchDonor(
+  plan: InpaintPlan,
+  choice: DonorChoice,
+): boolean {
+  if (
+    plan.orderLength <
+    INPAINT_MIN_PATCH_SELECTION_PIXELS ||
+    choice.score >
+    INPAINT_MAX_ACCEPTABLE_DONOR_SCORE
+  ) {
+    return false;
+  }
+
+  let maximumDepth =
+    0;
+
+  for (
+    let index = 0;
+    index <
+    plan.orderLength;
+    index++
+  ) {
+    maximumDepth =
+      Math.max(
+        maximumDepth,
+        plan.distance[
+          plan.order[index]
+        ],
+      );
+
+    if (
+      maximumDepth >=
+      INPAINT_MIN_PATCH_DEPTH
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function fillFromDonor(
@@ -2963,259 +3005,242 @@ function fallbackFill(
     ) /
     plan.width;
 
-  const pairs = [
-    [
-      [-1, 0],
-      [1, 0],
-    ],
-
-    [
-      [0, -1],
-      [0, 1],
-    ],
-
-    [
-      [-1, -1],
-      [1, 1],
-    ],
-
-    [
-      [1, -1],
-      [-1, 1],
-    ],
-  ] as const;
-
-  let red = 0;
-  let green = 0;
-  let blue = 0;
-  let alpha = 0;
-  let weightSum = 0;
+  const referencePixels: number[] = [];
 
   for (
     const [
-      firstDirection,
-      secondDirection,
-    ] of pairs
+      offsetX,
+      offsetY,
+    ] of INPAINT_DIRECTIONS
   ) {
-    const first =
-      directionalSource(
-        targetX,
-        targetY,
-        firstDirection[0],
-        firstDirection[1],
-        plan,
-        completed,
-      );
+    const nextX =
+      targetX + offsetX;
 
-    const second =
-      directionalSource(
-        targetX,
-        targetY,
-        secondDirection[0],
-        secondDirection[1],
-        plan,
-        completed,
-      );
+    const nextY =
+      targetY + offsetY;
 
     if (
-      !first &&
-      !second
+      !inpaintInside(
+        nextX,
+        nextY,
+        plan.width,
+        plan.height,
+      )
     ) {
       continue;
     }
 
+    const next =
+      nextY * plan.width +
+      nextX;
+
     if (
-      first &&
-      second
+      !plan.mask[next] ||
+      completed[next]
     ) {
-      const totalDistance =
-        first.distance +
-        second.distance;
+      referencePixels.push(next);
+    }
+  }
 
-      const firstWeight =
-        second.distance /
-        totalDistance;
+  const nearest =
+    plan.nearestSource[target];
 
-      const secondWeight =
-        first.distance /
-        totalDistance;
+  const anchor =
+    nearest >= 0
+      ? nearest
+      : referencePixels[0] ?? -1;
 
-      const pairWeight =
-        2 /
-        Math.max(
-          1,
-          totalDistance,
+  let bestSource = anchor;
+  let bestScore =
+    Number.POSITIVE_INFINITY;
+
+  const anchorGradient =
+    anchor >= 0
+      ? gradient(
+          pixels,
+          anchor,
+          plan.width,
+          plan.height,
+        )
+      : { x: 0, y: 0 };
+
+  const anchorLuma =
+    anchor >= 0
+      ? luma(pixels, anchor)
+      : 0;
+
+  for (
+    const [
+      directionX,
+      directionY,
+    ] of INPAINT_DIRECTIONS
+  ) {
+    const candidate =
+      directionalSource(
+        targetX,
+        targetY,
+        directionX,
+        directionY,
+        plan,
+        completed,
+      );
+
+    if (!candidate) {
+      continue;
+    }
+
+    const sourceIndex =
+      candidate.pixel * 4;
+
+    const sourceRed =
+      pixels[sourceIndex];
+
+    const sourceGreen =
+      pixels[sourceIndex + 1];
+
+    const sourceBlue =
+      pixels[sourceIndex + 2];
+
+    const sourceLuma =
+      luma(
+        pixels,
+        candidate.pixel,
+      );
+
+    const sourceGradient =
+      gradient(
+        pixels,
+        candidate.pixel,
+        plan.width,
+        plan.height,
+      );
+
+    let closestReferenceDifference =
+      Number.POSITIVE_INFINITY;
+
+    for (
+      const reference of
+      referencePixels
+    ) {
+      const referenceIndex =
+        reference * 4;
+
+      const colourDifference =
+        (
+          Math.abs(
+            sourceRed -
+            pixels[referenceIndex],
+          ) +
+          Math.abs(
+            sourceGreen -
+            pixels[referenceIndex + 1],
+          ) +
+          Math.abs(
+            sourceBlue -
+            pixels[referenceIndex + 2],
+          )
+        ) /
+        3;
+
+      const referenceDifference =
+        colourDifference +
+        Math.abs(
+          sourceLuma -
+          luma(pixels, reference),
+        ) *
+          0.55;
+
+      closestReferenceDifference =
+        Math.min(
+          closestReferenceDifference,
+          referenceDifference,
         );
+    }
 
-      const firstIndex =
-        first.pixel * 4;
+    if (
+      !Number.isFinite(
+        closestReferenceDifference,
+      )
+    ) {
+      closestReferenceDifference = 0;
+    }
 
-      const secondIndex =
-        second.pixel * 4;
+    let anchorDifference = 0;
 
-      red +=
+    if (anchor >= 0) {
+      const anchorIndex =
+        anchor * 4;
+
+      anchorDifference =
         (
-          pixels[
-            firstIndex
-          ] *
-            firstWeight +
-          pixels[
-            secondIndex
-          ] *
-            secondWeight
+          Math.abs(
+            sourceRed -
+            pixels[anchorIndex],
+          ) +
+          Math.abs(
+            sourceGreen -
+            pixels[anchorIndex + 1],
+          ) +
+          Math.abs(
+            sourceBlue -
+            pixels[anchorIndex + 2],
+          )
+        ) /
+          3 +
+        Math.abs(
+          sourceLuma -
+          anchorLuma,
         ) *
-        pairWeight;
+          0.65;
+    }
 
-      green +=
-        (
-          pixels[
-            firstIndex + 1
-          ] *
-            firstWeight +
-          pixels[
-            secondIndex + 1
-          ] *
-            secondWeight
-        ) *
-        pairWeight;
+    const gradientDifference =
+      Math.abs(
+        sourceGradient.x -
+        anchorGradient.x,
+      ) +
+      Math.abs(
+        sourceGradient.y -
+        anchorGradient.y,
+      );
 
-      blue +=
-        (
-          pixels[
-            firstIndex + 2
-          ] *
-            firstWeight +
-          pixels[
-            secondIndex + 2
-          ] *
-            secondWeight
-        ) *
-        pairWeight;
+    /*
+     * Follow the nearest structural side of the mask. Comparing each source to
+     * the nearest boundary anchor and the closest coherent neighbour avoids the
+     * old black-plus-background averaging that created a grey cloudy circle.
+     */
+    const score =
+      anchorDifference * 0.62 +
+      closestReferenceDifference * 0.28 +
+      gradientDifference * 0.22 +
+      candidate.distance * 1.15;
 
-      alpha +=
-        (
-          pixels[
-            firstIndex + 3
-          ] *
-            firstWeight +
-          pixels[
-            secondIndex + 3
-          ] *
-            secondWeight
-        ) *
-        pairWeight;
-
-      weightSum +=
-        pairWeight;
-    } else {
-      const source =
-        first ?? second;
-
-      if (!source) {
-        continue;
-      }
-
-      const sourceIndex =
-        source.pixel * 4;
-
-      const weight =
-        0.4 /
-        Math.max(
-          1,
-          source.distance,
-        );
-
-      red +=
-        pixels[sourceIndex] *
-        weight;
-
-      green +=
-        pixels[
-          sourceIndex + 1
-        ] *
-        weight;
-
-      blue +=
-        pixels[
-          sourceIndex + 2
-        ] *
-        weight;
-
-      alpha +=
-        pixels[
-          sourceIndex + 3
-        ] *
-        weight;
-
-      weightSum += weight;
+    if (score < bestScore) {
+      bestScore = score;
+      bestSource = candidate.pixel;
     }
   }
 
   const targetIndex =
     target * 4;
 
-  if (
-    weightSum > 0
-  ) {
+  if (bestSource >= 0) {
+    const sourceIndex =
+      bestSource * 4;
+
     pixels[targetIndex] =
-      clamp(
-        red / weightSum,
-      );
+      pixels[sourceIndex];
 
-    pixels[
-      targetIndex + 1
-    ] =
-      clamp(
-        green / weightSum,
-      );
+    pixels[targetIndex + 1] =
+      pixels[sourceIndex + 1];
 
-    pixels[
-      targetIndex + 2
-    ] =
-      clamp(
-        blue / weightSum,
-      );
+    pixels[targetIndex + 2] =
+      pixels[sourceIndex + 2];
 
-    pixels[
-      targetIndex + 3
-    ] =
-      clamp(
-        alpha / weightSum,
-      );
-  } else {
-    const nearest =
-      plan.nearestSource[
-        target
-      ];
-
-    if (nearest >= 0) {
-      const sourceIndex =
-        nearest * 4;
-
-      pixels[targetIndex] =
-        pixels[sourceIndex];
-
-      pixels[
-        targetIndex + 1
-      ] =
-        pixels[
-          sourceIndex + 1
-        ];
-
-      pixels[
-        targetIndex + 2
-      ] =
-        pixels[
-          sourceIndex + 2
-        ];
-
-      pixels[
-        targetIndex + 3
-      ] =
-        pixels[
-          sourceIndex + 3
-        ];
-    }
+    pixels[targetIndex + 3] =
+      pixels[sourceIndex + 3] >= 250
+        ? 255
+        : pixels[sourceIndex + 3];
   }
 
   completed[target] = 1;
@@ -3226,11 +3251,6 @@ function blendEdge(
   original: Uint8ClampedArray,
   plan: InpaintPlan,
 ): void {
-  const refined =
-    new Uint8ClampedArray(
-      pixels,
-    );
-
   for (
     let orderIndex = 0;
     orderIndex <
@@ -3238,221 +3258,63 @@ function blendEdge(
     orderIndex++
   ) {
     const target =
-      plan.order[
-        orderIndex
-      ];
+      plan.order[orderIndex];
 
-    const depth =
-      plan.distance[target];
+    const coverage =
+      plan.coverage[target];
 
-    if (depth > 2) {
+    // Core pixels remain completely reconstructed. Never blur them and never
+    // blend the original watermark back into the selected region.
+    if (coverage >= 255) {
       continue;
     }
-
-    const x =
-      target % plan.width;
-
-    const y =
-      (
-        target -
-        x
-      ) /
-      plan.width;
-
-    let red = 0;
-    let green = 0;
-    let blue = 0;
-    let count = 0;
-
-    for (
-      const [
-        offsetX,
-        offsetY,
-      ] of
-      INPAINT_DIRECTIONS
-    ) {
-      const nextX =
-        x + offsetX;
-
-      const nextY =
-        y + offsetY;
-
-      if (
-        !inpaintInside(
-          nextX,
-          nextY,
-          plan.width,
-          plan.height,
-        )
-      ) {
-        continue;
-      }
-
-      const index =
-        (
-          nextY *
-            plan.width +
-          nextX
-        ) *
-        4;
-
-      red += pixels[index];
-
-      green +=
-        pixels[index + 1];
-
-      blue +=
-        pixels[index + 2];
-
-      count++;
-    }
-
-    if (!count) {
-      continue;
-    }
-
-    const targetIndex =
-      target * 4;
-
-    const smoothing =
-      depth === 1
-        ? 0.1
-        : 0.045;
-
-    refined[targetIndex] =
-      clamp(
-        pixels[targetIndex] *
-          (
-            1 -
-            smoothing
-          ) +
-          (
-            red /
-            count
-          ) *
-            smoothing,
-      );
-
-    refined[
-      targetIndex + 1
-    ] =
-      clamp(
-        pixels[
-          targetIndex + 1
-        ] *
-          (
-            1 -
-            smoothing
-          ) +
-          (
-            green /
-            count
-          ) *
-            smoothing,
-      );
-
-    refined[
-      targetIndex + 2
-    ] =
-      clamp(
-        pixels[
-          targetIndex + 2
-        ] *
-          (
-            1 -
-            smoothing
-          ) +
-          (
-            blue /
-            count
-          ) *
-            smoothing,
-      );
-  }
-
-  for (
-    let orderIndex = 0;
-    orderIndex <
-    plan.orderLength;
-    orderIndex++
-  ) {
-    const target =
-      plan.order[
-        orderIndex
-      ];
 
     const targetIndex =
       target * 4;
 
     const strength =
-      plan.coverage[target] /
-      255;
+      coverage / 255;
 
     pixels[targetIndex] =
       clamp(
-        original[
-          targetIndex
-        ] *
-          (
-            1 -
-            strength
-          ) +
-          refined[
-            targetIndex
-          ] *
+        original[targetIndex] *
+          (1 - strength) +
+          pixels[targetIndex] *
             strength,
       );
 
-    pixels[
-      targetIndex + 1
-    ] =
+    pixels[targetIndex + 1] =
       clamp(
-        original[
-          targetIndex + 1
-        ] *
-          (
-            1 -
-            strength
-          ) +
-          refined[
-            targetIndex + 1
-          ] *
+        original[targetIndex + 1] *
+          (1 - strength) +
+          pixels[targetIndex + 1] *
             strength,
       );
 
-    pixels[
-      targetIndex + 2
-    ] =
+    pixels[targetIndex + 2] =
       clamp(
-        original[
-          targetIndex + 2
-        ] *
-          (
-            1 -
-            strength
-          ) +
-          refined[
-            targetIndex + 2
-          ] *
+        original[targetIndex + 2] *
+          (1 - strength) +
+          pixels[targetIndex + 2] *
             strength,
       );
 
-    pixels[
-      targetIndex + 3
-    ] =
-      clamp(
-        original[
-          targetIndex + 3
-        ] *
-          (
-            1 -
-            strength
-          ) +
-          refined[
-            targetIndex + 3
-          ] *
-            strength,
-      );
+    const originalAlpha =
+      original[targetIndex + 3];
+
+    const rebuiltAlpha =
+      pixels[targetIndex + 3];
+
+    pixels[targetIndex + 3] =
+      originalAlpha >= 250 &&
+      rebuiltAlpha >= 250
+        ? 255
+        : clamp(
+            originalAlpha *
+              (1 - strength) +
+              rebuiltAlpha *
+                strength,
+          );
   }
 }
 
@@ -3485,11 +3347,20 @@ export async function applyInpaintPlan(
       pixels,
     );
 
-  const donor =
+  const donorCandidate =
     chooseDonor(
       original,
       options.plan,
     );
+
+  const donor =
+    donorCandidate &&
+    shouldUsePatchDonor(
+      options.plan,
+      donorCandidate,
+    )
+      ? donorCandidate
+      : null;
 
   const completed =
     donor
@@ -3531,7 +3402,7 @@ export async function applyInpaintPlan(
       options.yieldControl &&
       orderIndex > 0 &&
       orderIndex %
-        40_000 ===
+        8_000 ===
         0
     ) {
       options.onProgress?.(

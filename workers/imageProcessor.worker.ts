@@ -5,6 +5,7 @@ import type {
 } from "../lib/imageWorkerTypes";
 import type { ProcessingStage } from "../lib/progress";
 import type { WorkerErrorCode } from "../lib/workerProtocol";
+import { applyLamaInpaint } from "./lamaInpainting";
 import {
   analyzeMask,
   applyInpaintPlan,
@@ -55,6 +56,85 @@ let backgroundRemovalModulePromise:
 
 const THIRD_PARTY_HEARTBEAT_MS =
   1_500;
+
+/**
+ * A small watermark should never require a 92 MB model download or a long
+ * neural inference. The edge-aware local engine is faster and preserves the
+ * original resolution, so it is the default for compact selections. LaMa is
+ * reserved for genuinely large or deep object-removal regions.
+ */
+const FAST_LOCAL_INPAINT_MAX_SELECTED_PIXELS = 90_000;
+const FAST_LOCAL_INPAINT_MAX_BOUNDS_PIXELS = 220_000;
+const FAST_LOCAL_INPAINT_MAX_BOUNDS_SIDE = 720;
+const FAST_LOCAL_INPAINT_MAX_REGION_PIXELS = 800_000;
+
+function shouldUseFastLocalInpaint(
+  analysis: {
+    selectedPixels: number;
+    selectedRatio: number;
+    bounds: {
+      width: number;
+      height: number;
+    } | null;
+  },
+  region: {
+    width: number;
+    height: number;
+  },
+): boolean {
+  const bounds = analysis.bounds;
+
+  if (!bounds) {
+    return true;
+  }
+
+  const boundsPixels =
+    Math.max(1, bounds.width) *
+    Math.max(1, bounds.height);
+
+  const regionPixels =
+    Math.max(1, region.width) *
+    Math.max(1, region.height);
+
+  const compactSelection =
+    analysis.selectedPixels <=
+      FAST_LOCAL_INPAINT_MAX_SELECTED_PIXELS &&
+    boundsPixels <=
+      FAST_LOCAL_INPAINT_MAX_BOUNDS_PIXELS &&
+    Math.max(bounds.width, bounds.height) <=
+      FAST_LOCAL_INPAINT_MAX_BOUNDS_SIDE &&
+    regionPixels <=
+      FAST_LOCAL_INPAINT_MAX_REGION_PIXELS;
+
+  const deviceMemory =
+    typeof navigator === "undefined"
+      ? 4
+      : navigator.deviceMemory ?? 4;
+
+  const hardwareConcurrency =
+    typeof navigator === "undefined"
+      ? 4
+      : navigator.hardwareConcurrency || 4;
+
+  const highResolutionCompactSelection =
+    analysis.selectedRatio <= 0.02 &&
+    analysis.selectedPixels <= 250_000 &&
+    boundsPixels <= 520_000 &&
+    Math.max(bounds.width, bounds.height) <= 900 &&
+    regionPixels <= 1_300_000;
+
+  const limitedDeviceSelection =
+    (deviceMemory <= 4 || hardwareConcurrency <= 4) &&
+    analysis.selectedPixels <= 150_000 &&
+    boundsPixels <= 360_000 &&
+    regionPixels <= 1_100_000;
+
+  return (
+    compactSelection ||
+    highResolutionCompactSelection ||
+    limitedDeviceSelection
+  );
+}
 
 function send(
   message: ImageWorkerResponse,
@@ -790,40 +870,149 @@ async function processMaskOperation(
           },
         );
 
-      await applyInpaintPlan(
-        {
-          context:
-            output.context,
+      const runLocalInpaint = async (): Promise<void> => {
+        // Complete the unused model stage so progress moves forward instead of
+        // appearing stuck while a small selection is reconstructed locally.
+        reportStage(
+          jobId,
+          "loading-model",
+          1,
+        );
 
-          plan:
-            inpaintPlan,
+        reportStage(
+          jobId,
+          "processing-tiles",
+          0.02,
+        );
 
-          checkCancelled:
-            () =>
-              checkCancelled(
-                jobId,
-              ),
+        await applyInpaintPlan(
+          {
+            context:
+              output.context,
 
-          yieldControl:
-            () =>
-              yieldControl(
-                jobId,
-              ),
+            plan:
+              inpaintPlan,
 
-          onProgress:
-            (
-              ratio,
-            ) => {
-              reportStage(
-                jobId,
+            checkCancelled:
+              () =>
+                checkCancelled(
+                  jobId,
+                ),
 
-                "processing-tiles",
+            yieldControl:
+              () =>
+                yieldControl(
+                  jobId,
+                ),
 
+            onProgress:
+              (
                 ratio,
-              );
+              ) => {
+                reportStage(
+                  jobId,
+
+                  "processing-tiles",
+
+                  ratio,
+                );
+              },
+          },
+        );
+      };
+
+      if (
+        shouldUseFastLocalInpaint(
+          analysis,
+          inpaintPlan,
+        )
+      ) {
+        await runLocalInpaint();
+      } else {
+        let aiStage: ProcessingStage =
+          "loading-model";
+
+        let aiRatio = 0;
+
+        try {
+          await runWithHeartbeat(
+            {
+              jobId,
+
+              getStage:
+                () => aiStage,
+
+              getRatio:
+                () => aiRatio,
+
+              task:
+                () =>
+                  applyLamaInpaint(
+                    {
+                      context:
+                        output.context,
+
+                      plan:
+                        inpaintPlan,
+
+                      checkCancelled:
+                        () =>
+                          checkCancelled(
+                            jobId,
+                          ),
+
+                      onResourceProgress:
+                        (
+                          current,
+                          total,
+                        ) => {
+                          reportResource(
+                            jobId,
+                            "lama-inpainting-model",
+                            current,
+                            total,
+                          );
+                        },
+
+                      onStageProgress:
+                        (
+                          stage,
+                          ratio,
+                        ) => {
+                          aiStage = stage;
+                          aiRatio = ratio;
+
+                          reportStage(
+                            jobId,
+                            stage,
+                            ratio,
+                          );
+                        },
+                    },
+                  ),
             },
-        },
-      );
+          );
+        } catch (error) {
+          if (
+            error instanceof
+            WorkerCancelledError
+          ) {
+            throw error;
+          }
+
+          /*
+           * Model loading can fail on a restricted network, unsupported WASM
+           * runtime, or first-load interruption. Keep the operation usable with
+           * the edge-aware local fallback instead of failing the entire edit.
+           */
+          console.warn(
+            "LaMa inpainting was unavailable; using the local edge-aware fallback.",
+            error,
+          );
+
+          await runLocalInpaint();
+        }
+      }
     }
 
     reportStage(
@@ -943,12 +1132,12 @@ async function createCappedBackgroundSource(
     ImageWorkerProcessRequest,
 ): Promise<Blob> {
   const unchanged =
-    request.plan.output
+    request.plan.working
       .width ===
       request
         .sourceDimensions
         .width &&
-    request.plan.output
+    request.plan.working
       .height ===
       request
         .sourceDimensions
@@ -977,10 +1166,10 @@ async function createCappedBackgroundSource(
       await decodeBitmap(
         request.source,
 
-        request.plan.output
+        request.plan.working
           .width,
 
-        request.plan.output
+        request.plan.working
           .height,
       );
 
@@ -992,10 +1181,10 @@ async function createCappedBackgroundSource(
       drawBitmap(
         bitmap,
 
-        request.plan.output
+        request.plan.working
           .width,
 
-        request.plan.output
+        request.plan.working
           .height,
 
         false,
@@ -1019,6 +1208,167 @@ async function createCappedBackgroundSource(
 
     releaseCanvas(
       canvas,
+    );
+  }
+}
+
+/**
+ * IMG.LY returns a transparent foreground at the neural-network input size.
+ * For reliability we run inference on plan.working, then scale only the alpha
+ * matte back onto the browser-safe plan.output image. This preserves the
+ * original RGB detail while avoiding full-resolution ONNX inference.
+ */
+async function restoreAutomaticBackgroundOutput(
+  request:
+    ImageWorkerProcessRequest,
+
+  foreground:
+    Blob,
+): Promise<Blob> {
+  const outputWidth =
+    request.plan.output
+      .width;
+
+  const outputHeight =
+    request.plan.output
+      .height;
+
+  const workingWidth =
+    request.plan.working
+      .width;
+
+  const workingHeight =
+    request.plan.working
+      .height;
+
+  if (
+    outputWidth ===
+      workingWidth &&
+    outputHeight ===
+      workingHeight
+  ) {
+    reportStage(
+      request.jobId,
+      "resizing-output",
+      1,
+    );
+
+    return foreground;
+  }
+
+  let sourceBitmap:
+    | ImageBitmap
+    | null = null;
+
+  let foregroundBitmap:
+    | ImageBitmap
+    | null = null;
+
+  let outputCanvas:
+    | OffscreenCanvas
+    | null = null;
+
+  try {
+    reportStage(
+      request.jobId,
+      "resizing-output",
+      0.05,
+    );
+
+    sourceBitmap =
+      await decodeBitmap(
+        request.source,
+        outputWidth,
+        outputHeight,
+      );
+
+    checkCancelled(
+      request.jobId,
+    );
+
+    reportStage(
+      request.jobId,
+      "resizing-output",
+      0.38,
+    );
+
+    foregroundBitmap =
+      await createImageBitmap(
+        foreground,
+      );
+
+    checkCancelled(
+      request.jobId,
+    );
+
+    const drawn =
+      drawBitmap(
+        sourceBitmap,
+        outputWidth,
+        outputHeight,
+        false,
+      );
+
+    outputCanvas =
+      drawn.canvas;
+
+    drawn.context.save();
+
+    /*
+     * destination-in keeps the original source colours and uses only the
+     * foreground result's alpha channel as the cut-out mask.
+     */
+    drawn.context.globalCompositeOperation =
+      "destination-in";
+
+    drawn.context.imageSmoothingEnabled =
+      true;
+
+    drawn.context.imageSmoothingQuality =
+      "high";
+
+    drawn.context.drawImage(
+      foregroundBitmap,
+      0,
+      0,
+      outputWidth,
+      outputHeight,
+    );
+
+    drawn.context.restore();
+
+    reportStage(
+      request.jobId,
+      "resizing-output",
+      1,
+    );
+
+    reportStage(
+      request.jobId,
+      "encoding-output",
+      0.05,
+    );
+
+    const restored =
+      await encodeCanvas(
+        outputCanvas,
+        "image/png",
+      );
+
+    reportStage(
+      request.jobId,
+      "encoding-output",
+      1,
+    );
+
+    return restored;
+  } finally {
+    sourceBitmap?.close();
+
+    foregroundBitmap?.close();
+
+    releaseCanvas(
+      outputCanvas,
     );
   }
 }
@@ -1305,85 +1655,170 @@ async function processAutomaticBackground(
       );
     };
 
-  const configuration = {
-    debug:
-      false,
+  type BackgroundModel =
+    | "isnet_fp16"
+    | "isnet_quint8";
 
-    device:
-      "cpu" as const,
+  const preferredModel:
+    BackgroundModel =
+    request.plan
+      .safetyProfile
+      .tier ===
+    "high"
+      ? "isnet_fp16"
+      : "isnet_quint8";
 
-    model:
-      "isnet_fp16" as const,
+  const modelAttempts:
+    BackgroundModel[] =
+    preferredModel ===
+    "isnet_fp16"
+      ? [
+          "isnet_fp16",
+          "isnet_quint8",
+        ]
+      : [
+          "isnet_quint8",
+        ];
 
-    /*
-     * Sharpixa has already placed the whole operation inside its own
-     * dedicated worker. Creating another nested proxy worker would add
-     * another lifecycle and failure path.
-     */
-    proxyToWorker:
-      false,
+  let blob:
+    | Blob
+    | null = null;
 
-    output: {
-      format:
-        "image/png" as const,
-
-      quality:
-        1,
-    },
-
-    progress,
-  };
+  let lastFailure:
+    unknown = null;
 
   /*
-   * Do not call preload() and then removeBackground() on every job.
-   * removeBackground() performs the required asset loading and can use
-   * the browser's package/model cache. Avoiding the separate preload
-   * removes an additional promise that previously had no completion
-   * watchdog.
+   * The smaller quantized model is the safer default on ordinary devices.
+   * High-memory devices try the higher-quality fp16 model first and fall back
+   * once if browser inference rejects or runs out of memory.
    */
-  const blob =
-    await runWithHeartbeat(
-      {
-        jobId,
-
-        getStage:
-          () =>
-            heartbeatStage,
-
-        getRatio:
-          () =>
-            heartbeatRatio,
-
-        task:
-          async () => {
-            return backgroundRemoval
-              .removeBackground(
-                source,
-                configuration,
-              )
-              .catch(
-                (
-                  error:
-                    unknown,
-                ) => {
-                  if (
-                    error instanceof
-                      WorkerCancelledError ||
-                    cancelledJobs.has(
-                      jobId,
-                    )
-                  ) {
-                    throw new WorkerCancelledError();
-                  }
-
-                  throw new Error(
-                    "background-processing-failed",
-                  );
-                },
-              );
-          },
-      },
+  for (
+    const model of
+    modelAttempts
+  ) {
+    checkCancelled(
+      jobId,
     );
+
+    const configuration = {
+      debug:
+        false,
+
+      device:
+        "cpu" as const,
+
+      model,
+
+      /*
+       * Sharpixa has already placed the whole operation inside its own
+       * dedicated worker. Creating another nested proxy worker would add
+       * another lifecycle and failure path.
+       */
+      proxyToWorker:
+        false,
+
+      output: {
+        format:
+          "image/png" as const,
+
+        quality:
+          1,
+
+        type:
+          "foreground" as const,
+      },
+
+      progress,
+    };
+
+    try {
+      blob =
+        await runWithHeartbeat(
+          {
+            jobId,
+
+            getStage:
+              () =>
+                heartbeatStage,
+
+            getRatio:
+              () =>
+                heartbeatRatio,
+
+            task:
+              async () =>
+                backgroundRemoval
+                  .removeBackground(
+                    source,
+                    configuration,
+                  ),
+          },
+        );
+
+      break;
+    } catch (
+      error
+    ) {
+      if (
+        error instanceof
+          WorkerCancelledError ||
+        cancelledJobs.has(
+          jobId,
+        )
+      ) {
+        throw new WorkerCancelledError();
+      }
+
+      lastFailure =
+        error;
+
+      if (
+        process.env.NODE_ENV !==
+        "production"
+      ) {
+        console.error(
+          `Background removal failed with ${model}:`,
+          error,
+        );
+      }
+
+      /*
+       * Keep the next attempt alive and visible. The main-thread controller
+       * clamps percentage progress upward, so a fallback never jumps back.
+       */
+      heartbeatStage =
+        "loading-model";
+
+      heartbeatRatio =
+        Math.max(
+          0.12,
+          heartbeatRatio,
+        );
+    }
+  }
+
+  if (!blob) {
+    const failedWhileLoading =
+      heartbeatStage ===
+      "loading-model";
+
+    if (
+      process.env.NODE_ENV !==
+      "production"
+    ) {
+      console.error(
+        "Automatic background removal exhausted all model attempts:",
+        lastFailure,
+      );
+    }
+
+    throw new Error(
+      failedWhileLoading
+        ? "model-load-failed"
+        : "background-processing-failed",
+    );
+  }
+
 
   checkCancelled(
     jobId,
@@ -1413,6 +1848,22 @@ async function processAutomaticBackground(
     1,
   );
 
+  const outputBlob =
+    await restoreAutomaticBackgroundOutput(
+      request,
+      blob,
+    );
+
+  checkCancelled(
+    jobId,
+  );
+
+  if (!outputBlob.size) {
+    throw new Error(
+      "empty-output",
+    );
+  }
+
   reportStage(
     jobId,
     "encoding-output",
@@ -1420,7 +1871,8 @@ async function processAutomaticBackground(
   );
 
   return {
-    blob,
+    blob:
+      outputBlob,
 
     width:
       request.plan.output

@@ -272,7 +272,7 @@ const SUPPORTED_FORMATS = [
       "Videos",
 
     description:
-      "MP4, M4V, MOV, MKV, WEBM, OGG, and MPEG-TS",
+      "MP4, MOV, AVI, WEBM, and MKV",
 
     limit:
       "Up to 30 seconds / 50MB",

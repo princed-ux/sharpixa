@@ -12,15 +12,10 @@ export const IMAGE_FORMATS = [
 
 export const VIDEO_FORMATS = [
   "mp4",
-  "m4v",
   "mov",
-  "mkv",
+  "avi",
   "webm",
-  "ogv",
-  "ogg",
-  "ts",
-  "mts",
-  "m2ts",
+  "mkv",
 ] as const;
 
 export type ImageFormat =
@@ -424,7 +419,7 @@ export const FAQS_BY_MODE: Record<
         "Which file formats are supported?",
 
       a:
-        "Images support JPG, JPEG, PNG, and WEBP. Videos support MP4, M4V, MOV, MKV, WEBM, OGG/OGV, and MPEG-TS containers when the video codec is decodable on the device.",
+        "Images support JPG, JPEG, PNG, and WEBP. Videos support MP4, MOV, AVI, WEBM, and MKV when the browser can decode and encode the selected format.",
     },
 
     {
@@ -851,7 +846,7 @@ export const VIDEO_FILE_TYPES: SupportedFileType[] = [
   },
 
   {
-    ext: "M4V",
+    ext: "AVI",
     color: "#f97316",
   },
 
@@ -863,11 +858,6 @@ export const VIDEO_FILE_TYPES: SupportedFileType[] = [
   {
     ext: "MKV",
     color: "#06b6d4",
-  },
-
-  {
-    ext: "MPEG-TS",
-    color: "#ec4899",
   },
 ];
 

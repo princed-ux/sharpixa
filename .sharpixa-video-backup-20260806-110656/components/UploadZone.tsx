@@ -22,10 +22,11 @@ import {
   type PresetName,
 } from "@/lib/constants";
 import {
+  captureVideoFrame,
   formatBytes,
   generateSampleImage,
-  inspectVideoFile,
   readImageDimensions,
+  readVideoMetadata,
 } from "@/lib/enhance";
 import {
   ImageWorkerClient,
@@ -110,7 +111,7 @@ const IMAGE_ACCEPT =
   ".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp";
 
 const VIDEO_ACCEPT =
-  ".mp4,.m4v,.mov,.mkv,.webm,.ogv,.ogg,.ts,.mts,.m2ts,video/mp4,video/quicktime,video/webm,video/x-matroska,video/ogg,video/mp2t";
+  ".mp4,.mov,.avi,.webm,.mkv,video/mp4,video/quicktime,video/webm";
 
 const IMAGE_RESOLUTIONS: ProcessingResolution[] = [
   "original",
@@ -125,7 +126,7 @@ const VIDEO_RESOLUTIONS: ProcessingResolution[] = [
 ];
 
 const PREFLIGHT_TIMEOUT_MS =
-  60_000;
+  20_000;
 
 const RESOLUTION_LABELS: Record<
   ProcessingResolution,
@@ -518,13 +519,6 @@ export default function UploadZone({
     useState<string | null>(
       null,
     );
-
-  const [
-    videoPreviewSupported,
-    setVideoPreviewSupported,
-  ] = useState(
-    true,
-  );
 
   const [
     fileType,
@@ -1188,10 +1182,6 @@ export default function UploadZone({
 
         setVideoMetadata(
           null,
-        );
-
-        setVideoPreviewSupported(
-          true,
         );
 
         setVideoWarning(
@@ -1997,7 +1987,7 @@ export default function UploadZone({
           !isVideo
         ) {
           setError(
-            "Unsupported format. Use JPG, JPEG, PNG, WEBP, MP4, M4V, MOV, MKV, WEBM, OGG/OGV, or MPEG-TS.",
+            "Unsupported format. Use JPG, JPEG, PNG, WEBP, MP4, MOV, AVI, WEBM, or MKV.",
           );
 
           return;
@@ -2117,10 +2107,6 @@ export default function UploadZone({
           null,
         );
 
-        setVideoPreviewSupported(
-          true,
-        );
-
         setVideoWarning(
           null,
         );
@@ -2182,14 +2168,6 @@ export default function UploadZone({
             | null =
             null;
 
-          let videoPoster:
-            | Blob
-            | null =
-            null;
-
-          let canPreviewVideo =
-            true;
-
           if (
             nextType ===
             "image"
@@ -2224,25 +2202,11 @@ export default function UploadZone({
                 decoded.height,
             };
           } else {
-            setPreparingMessage(
-              "Inspecting the video container and codec…",
-            );
-
-            const inspection =
-              await inspectVideoFile(
-                inputFile,
+            metadata =
+              await readVideoMetadata(
                 nextUrl,
                 preflight.signal,
               );
-
-            metadata =
-              inspection.metadata;
-
-            videoPoster =
-              inspection.poster;
-
-            canPreviewVideo =
-              inspection.browserPreviewSupported;
 
             const validation =
               validateVideoPreflight(
@@ -2261,19 +2225,8 @@ export default function UploadZone({
               );
             }
 
-            const previewWarning =
-              canPreviewVideo
-                ? null
-                : "This video container cannot play directly in the browser preview. Sharpixa will use a decoded still frame for editing and will still process the original video.";
-
             setVideoWarning(
-              [
-                validation.warning,
-                previewWarning,
-              ]
-                .filter(Boolean)
-                .join(" ") ||
-                null,
+              validation.warning,
             );
 
             dimensions = {
@@ -2326,20 +2279,6 @@ export default function UploadZone({
             metadata,
           );
 
-          setVideoPreviewSupported(
-            canPreviewVideo,
-          );
-
-          if (
-            videoPoster
-          ) {
-            replacePosterUrl(
-              URL.createObjectURL(
-                videoPoster,
-              ),
-            );
-          }
-
           setVideoMaskTimeRange(
             metadata
               ? {
@@ -2374,6 +2313,36 @@ export default function UploadZone({
             });
 
             return;
+          }
+
+          if (
+            mode ===
+              "watermark" &&
+            nextType ===
+              "video"
+          ) {
+            setPreparingMessage(
+              "Preparing the video editor…",
+            );
+
+            const poster =
+              await captureVideoFrame(
+                nextUrl,
+                preflight.signal,
+              );
+
+            if (
+              mountedRef.current &&
+              fileUrlRef.current ===
+                nextUrl &&
+              !preflight.signal.aborted
+            ) {
+              replacePosterUrl(
+                URL.createObjectURL(
+                  poster,
+                ),
+              );
+            }
           }
 
           setPhase(
@@ -2427,10 +2396,6 @@ export default function UploadZone({
               null,
             );
 
-            setVideoPreviewSupported(
-              true,
-            );
-
             setVideoMaskTimeRange(
               null,
             );
@@ -2443,42 +2408,13 @@ export default function UploadZone({
               "upload",
             );
 
-            const rawPreflightMessage =
-              preflightError instanceof Error
-                ? preflightError.message
-                : "";
-
-            const unsupportedCodec =
-              rawPreflightMessage.startsWith(
-                "unsupported-video-codec:",
-              );
-
-            const codecName =
-              unsupportedCodec
-                ? rawPreflightMessage
-                    .split(":")[1]
-                    ?.toUpperCase() ||
-                  "UNKNOWN"
-                : null;
-
             setError(
               timedOut
-                ? "Sharpixa stopped waiting because this file took too long to inspect. Try a shorter or smaller video."
+                ? "Sharpixa stopped waiting because this file took too long to open. Try a smaller file or convert it to JPG, PNG, MP4, or WEBM."
                 : preflightError instanceof
                     WorkerProcessingError
                   ? preflightError.message
-                  : rawPreflightMessage ===
-                      "unsupported-video-container"
-                    ? "Sharpixa could not recognize this video's container. Try MP4, MOV, M4V, MKV, WEBM, OGG, or MPEG-TS."
-                    : unsupportedCodec
-                      ? `This browser cannot decode the ${codecName} video track. The file itself may be valid, but this device does not provide that codec.`
-                      : rawPreflightMessage ===
-                          "video-track-missing"
-                        ? "This file does not contain a readable video track."
-                        : rawPreflightMessage ===
-                            "video-poster-frame-missing"
-                          ? "Sharpixa found the video but could not decode its first usable frame."
-                          : "Sharpixa could not safely inspect this video. The container or codec may not be supported on this device.",
+                  : "This file could not be decoded safely. It may be corrupt or unsupported.",
             );
           }
         } finally {
@@ -3070,25 +3006,14 @@ export default function UploadZone({
                 </p>
 
                 <div className="result-preview p-2">
-                  {videoPreviewSupported ? (
-                    <video
-                      src={
-                        fileURL ??
-                        ""
-                      }
-                      controls
-                      className="max-h-[60vh] w-full rounded-lg object-contain"
-                    />
-                  ) : posterURL ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={
-                        posterURL
-                      }
-                      alt="Original video preview frame"
-                      className="max-h-[60vh] w-full rounded-lg object-contain"
-                    />
-                  ) : null}
+                  <video
+                    src={
+                      fileURL ??
+                      ""
+                    }
+                    controls
+                    className="max-h-[60vh] w-full rounded-lg object-contain"
+                  />
                 </div>
               </div>
 
@@ -3259,8 +3184,7 @@ export default function UploadZone({
               }
               videoUrl={
                 fileType ===
-                  "video" &&
-                videoPreviewSupported
+                "video"
                   ? fileURL
                   : undefined
               }
@@ -3504,7 +3428,7 @@ export default function UploadZone({
                         liveFilter,
                     }}
                   />
-                ) : videoPreviewSupported ? (
+                ) : (
                   <video
                     src={
                       fileURL
@@ -3516,23 +3440,6 @@ export default function UploadZone({
                         liveFilter,
                     }}
                   />
-                ) : posterURL ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={
-                      posterURL
-                    }
-                    alt="Decoded video preview frame"
-                    className="block h-auto max-h-[66vh] w-auto max-w-full rounded-lg object-contain"
-                    style={{
-                      filter:
-                        liveFilter,
-                    }}
-                  />
-                ) : (
-                  <div className="text-sm text-gray-300">
-                    Preparing a compatible video preview…
-                  </div>
                 )}
               </div>
 
@@ -4254,7 +4161,7 @@ export default function UploadZone({
           {tab ===
           "image"
             ? "JPG · JPEG · PNG · WEBP — maximum 20MB"
-            : "MP4 · M4V · MOV · MKV · WEBM · OGG · MPEG-TS — up to 5 minutes, 1080p input, and 300MB"}
+            : "MP4 · MOV · AVI · WEBM · MKV — up to 5 minutes, 1080p input, and 300MB"}
         </p>
       </div>
 

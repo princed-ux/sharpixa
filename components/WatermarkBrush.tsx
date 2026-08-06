@@ -50,8 +50,8 @@ const TOOLS: Array<{
   },
   {
     id: "circle",
-    label: "Circle",
-    help: "Drag an ellipse around a logo or object.",
+    label: "Tight area",
+    help: "Drag a tight ellipse directly over the unwanted pixels. Everything inside the ellipse will be rebuilt.",
   },
   {
     id: "erase",
@@ -442,7 +442,7 @@ export default function WatermarkBrush({
   const [
     brushSize,
     setBrushSize,
-  ] = useState(34);
+  ] = useState(22);
 
   const [
     hardness,
@@ -3432,7 +3432,7 @@ export default function WatermarkBrush({
                   ? "Erase visibly removes purple selection pixels."
                   : tool ===
                       "circle"
-                    ? "Drag from one corner to the opposite corner to create an ellipse."
+                    ? "Fit the ellipse tightly over the unwanted pixels. Do not draw a loose circle around the watermark, because every pixel inside is replaced."
                     : isVideo
                       ? "Clicking the video with a drawing tool pauses it automatically before painting."
                       : "Paint directly over only the unwanted logo, text, watermark, or object."}
